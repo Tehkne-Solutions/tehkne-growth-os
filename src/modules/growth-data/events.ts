@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SectorPackManifest } from "@/modules/sector-packs/types";
 import type { GrowthEvent } from "./types";
 
@@ -13,5 +14,11 @@ export function assertEventBelongsToPack(
 export function eventDeduplicationKey(
   event: Pick<GrowthEvent, "workspaceId" | "source" | "externalId" | "id">,
 ): string {
-  return `${event.workspaceId}:${event.source}:${event.externalId ?? event.id}`;
+  return createHash("sha256")
+    .update(event.workspaceId)
+    .update("\0")
+    .update(event.source)
+    .update("\0")
+    .update(event.externalId ?? event.id)
+    .digest("hex");
 }
