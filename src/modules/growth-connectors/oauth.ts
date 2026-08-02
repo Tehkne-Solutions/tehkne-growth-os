@@ -96,6 +96,7 @@ export async function consumeOAuthAttempt(
   dependencies: Readonly<{ database: DatabaseClient; secrets: SecretProvider }>,
   input: Readonly<{
     state: string;
+    userId: string;
     configuration: OAuthProviderConfiguration;
     now?: Date;
   }>,
@@ -112,13 +113,14 @@ export async function consumeOAuthAttempt(
     UPDATE growth_connector_oauth_attempts
     SET consumed_at = ${now}
     WHERE state_hash = ${stateHash}
+      AND created_by_user_id = ${input.userId}::uuid
       AND consumed_at IS NULL
       AND expires_at > ${now}
     RETURNING id AS "attemptId", workspace_id AS "workspaceId", provider,
       pkce_secret_ref AS "pkceSecretRef", redirect_uri AS "redirectUri"
   `;
   const attempt = rows[0];
-  if (!attempt) throw new OAuthStateValidationError("OAuth state is invalid, expired, or already consumed.");
+  if (!attempt) throw new OAuthStateValidationError("OAuth state is invalid, expired, already consumed, or belongs to another user.");
 
   const [pkce, credentials] = await Promise.all([
     dependencies.secrets.get(attempt.pkceSecretRef),
