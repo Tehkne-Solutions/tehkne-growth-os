@@ -6,8 +6,14 @@ import {
   PrismaIdentityRepository,
   validateSession,
 } from "@/modules/identity";
-import { loadAuthorizedCommandCenterSnapshot } from "@/modules/command-center/authorized-query";
-import { listAuthorizedCommandCenterWorkspaces } from "@/modules/command-center/workspaces";
+import {
+  loadAuthorizedCommandCenterSnapshot,
+} from "@/modules/command-center/authorized-query";
+import type { CommandCenterSnapshot } from "@/modules/command-center/query";
+import {
+  listAuthorizedCommandCenterWorkspaces,
+  type CommandCenterWorkspaceOption,
+} from "@/modules/command-center/workspaces";
 import { getSessionCookieName } from "@/modules/identity/http/security";
 import { parseTenantContext } from "@/modules/tenancy";
 import {
@@ -23,20 +29,86 @@ type CommandCenterPageProps = {
   searchParams: Promise<Record<string, SearchValue>>;
 };
 
+type PageState =
+  | { kind: "operator-required" }
+  | { kind: "authentication-required" }
+  | { kind: "forbidden" }
+  | { kind: "unavailable" }
+  | {
+      kind: "workspace-selection";
+      operatorOrganizationId: string;
+      workspaces: CommandCenterWorkspaceOption[];
+      from?: string;
+      to?: string;
+    }
+  | {
+      kind: "snapshot";
+      operatorOrganizationId: string;
+      snapshot: CommandCenterSnapshot;
+    };
+
 export default async function CommandCenterPage({
   searchParams,
 }: CommandCenterPageProps) {
-  const params = await searchParams;
-  const operatorOrganizationId = first(params.operatorOrganizationId);
-  if (!operatorOrganizationId) {
-    return (
-      <StatePage
-        title="Selecione uma operadora"
-        detail="O Command Center começa em um contexto de tenant explícito. Informe a operadora para descobrir apenas os workspaces permitidos pela sua membership."
-        code="operatorOrganizationId"
-      />
-    );
+  const state = await resolvePageState(await searchParams);
+
+  switch (state.kind) {
+    case "operator-required":
+      return (
+        <StatePage
+          title="Selecione uma operadora"
+          detail="O Command Center começa em um contexto de tenant explícito. Informe a operadora para descobrir apenas os workspaces permitidos pela sua membership."
+          code="operatorOrganizationId"
+        />
+      );
+    case "authentication-required":
+      return (
+        <StatePage
+          title="Autenticação necessária"
+          detail="Entre no Tehkné Growth OS antes de acessar dados operacionais."
+          code="401 · authentication_required"
+        />
+      );
+    case "forbidden":
+      return (
+        <StatePage
+          title="Acesso não autorizado"
+          detail="Sua membership atual não concede leitura do Command Center neste workspace."
+          code="403 · growth.command_center.read"
+        />
+      );
+    case "unavailable":
+      return (
+        <StatePage
+          title="Command Center indisponível"
+          detail="Não foi possível carregar o snapshot persistido deste workspace."
+          code="command_center_unavailable"
+        />
+      );
+    case "workspace-selection":
+      return (
+        <WorkspaceSelectionPage
+          operatorOrganizationId={state.operatorOrganizationId}
+          workspaces={state.workspaces}
+          from={state.from}
+          to={state.to}
+        />
+      );
+    case "snapshot":
+      return (
+        <CommandCenterDashboard
+          operatorOrganizationId={state.operatorOrganizationId}
+          snapshot={state.snapshot}
+        />
+      );
   }
+}
+
+async function resolvePageState(
+  params: Record<string, SearchValue>,
+): Promise<PageState> {
+  const operatorOrganizationId = first(params.operatorOrganizationId);
+  if (!operatorOrganizationId) return { kind: "operator-required" };
 
   try {
     const environment = parseServerEnvironment(process.env);
@@ -57,15 +129,13 @@ export default async function CommandCenterPage({
         { database, authorizationStore: identityRepository },
         { userId: session.userId, operatorOrganizationId },
       );
-
-      return (
-        <WorkspaceSelectionPage
-          operatorOrganizationId={operatorOrganizationId}
-          workspaces={workspaces}
-          from={first(params.from)}
-          to={first(params.to)}
-        />
-      );
+      return {
+        kind: "workspace-selection",
+        operatorOrganizationId,
+        workspaces,
+        from: first(params.from),
+        to: first(params.to),
+      };
     }
 
     const tenant = parseTenantContext({
@@ -84,129 +154,121 @@ export default async function CommandCenterPage({
       },
     );
 
-    return (
-      <main className={styles.page}>
-        <div className={styles.topbar}>
-          <div className={styles.brand}>
-            <span className={styles.brandMark} />
-            Tehkné Growth OS
-          </div>
-          <a
-            className={styles.contextLink}
-            href={`/command-center?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`}
-          >
-            Trocar workspace
-          </a>
-        </div>
-
-        <section className={styles.hero}>
-          <div>
-            <p className={styles.eyebrow}>Command Center · dados persistidos</p>
-            <h1 className={styles.title}>
-              Sinais de Growth em um único contexto operacional.
-            </h1>
-          </div>
-          <div className={styles.period}>
-            {formatDate(snapshot.from)} — {formatDate(snapshot.to)}
-          </div>
-        </section>
-
-        {snapshot.metrics.length > 0 ? (
-          <section className={styles.metrics} aria-label="Métricas do período">
-            {snapshot.metrics.map((metric) => (
-              <article
-                className={styles.metricCard}
-                key={`${metric.metricId}:${metric.currency ?? "none"}`}
-              >
-                <p className={styles.metricLabel}>{humanizeMetric(metric.metricId)}</p>
-                <p className={styles.metricValue}>
-                  {formatMetric(metric.value, metric.currency)}
-                </p>
-              </article>
-            ))}
-          </section>
-        ) : (
-          <section className={styles.secondaryGrid}>
-            <article className={styles.infoCard}>
-              <p className={styles.eyebrow}>Estado vazio</p>
-              <h2>Nenhuma métrica neste período.</h2>
-              <p>
-                O painel não inventa valores. Importe observações canônicas ou
-                selecione outro período para visualizar KPIs.
-              </p>
-            </article>
-          </section>
-        )}
-
-        <section className={styles.secondaryGrid}>
-          <article className={styles.infoCard}>
-            <p className={styles.eyebrow}>Eventos</p>
-            <h2>{snapshot.eventCount.toLocaleString("pt-BR")} eventos no período</h2>
-            <p>
-              Contagem derivada somente de eventos persistidos dentro do workspace
-              autorizado e da janela selecionada.
-            </p>
-          </article>
-
-          <article className={styles.infoCard}>
-            <p className={styles.eyebrow}>Última importação</p>
-            {snapshot.latestImport ? (
-              <>
-                <h2>{snapshot.latestImport.status}</h2>
-                <p>{formatDate(snapshot.latestImport.createdAt)}</p>
-                <div className={styles.importStats}>
-                  <div>
-                    <span className={styles.context}>Aceitas</span>
-                    <strong>{snapshot.latestImport.acceptedCount}</strong>
-                  </div>
-                  <div>
-                    <span className={styles.context}>Rejeitadas</span>
-                    <strong>{snapshot.latestImport.rejectedCount}</strong>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2>Sem importações</h2>
-                <p>Ainda não existe batch persistido para este workspace.</p>
-              </>
-            )}
-          </article>
-        </section>
-
-        <footer className={styles.footer}>
-          <span>Command Center · Sprint 3</span>
-          <span>Tehkné Solutions</span>
-        </footer>
-      </main>
-    );
+    return { kind: "snapshot", operatorOrganizationId, snapshot };
   } catch (error) {
     if (error instanceof InvalidSessionError) {
-      return (
-        <StatePage
-          title="Autenticação necessária"
-          detail="Entre no Tehkné Growth OS antes de acessar dados operacionais."
-          code="401 · authentication_required"
-        />
-      );
+      return { kind: "authentication-required" };
     }
     if (error instanceof AuthorizationDeniedError) {
-      return (
-        <StatePage
-          title="Acesso não autorizado"
-          detail="Sua membership atual não concede leitura do Command Center neste workspace."
-          code="403 · growth.command_center.read"
-        />
-      );
+      return { kind: "forbidden" };
     }
-    return (
-      <StatePage
-        title="Command Center indisponível"
-        detail="Não foi possível carregar o snapshot persistido deste workspace."
-        code="command_center_unavailable"
-      />
-    );
+    return { kind: "unavailable" };
   }
+}
+
+function CommandCenterDashboard({
+  operatorOrganizationId,
+  snapshot,
+}: Readonly<{
+  operatorOrganizationId: string;
+  snapshot: CommandCenterSnapshot;
+}>) {
+  return (
+    <main className={styles.page}>
+      <div className={styles.topbar}>
+        <div className={styles.brand}>
+          <span className={styles.brandMark} />
+          Tehkné Growth OS
+        </div>
+        <a
+          className={styles.contextLink}
+          href={`/command-center?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`}
+        >
+          Trocar workspace
+        </a>
+      </div>
+
+      <section className={styles.hero}>
+        <div>
+          <p className={styles.eyebrow}>Command Center · dados persistidos</p>
+          <h1 className={styles.title}>
+            Sinais de Growth em um único contexto operacional.
+          </h1>
+        </div>
+        <div className={styles.period}>
+          {formatDate(snapshot.from)} — {formatDate(snapshot.to)}
+        </div>
+      </section>
+
+      {snapshot.metrics.length > 0 ? (
+        <section className={styles.metrics} aria-label="Métricas do período">
+          {snapshot.metrics.map((metric) => (
+            <article
+              className={styles.metricCard}
+              key={`${metric.metricId}:${metric.currency ?? "none"}`}
+            >
+              <p className={styles.metricLabel}>{humanizeMetric(metric.metricId)}</p>
+              <p className={styles.metricValue}>
+                {formatMetric(metric.value, metric.currency)}
+              </p>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <section className={styles.secondaryGrid}>
+          <article className={styles.infoCard}>
+            <p className={styles.eyebrow}>Estado vazio</p>
+            <h2>Nenhuma métrica neste período.</h2>
+            <p>
+              O painel não inventa valores. Importe observações canônicas ou
+              selecione outro período para visualizar KPIs.
+            </p>
+          </article>
+        </section>
+      )}
+
+      <section className={styles.secondaryGrid}>
+        <article className={styles.infoCard}>
+          <p className={styles.eyebrow}>Eventos</p>
+          <h2>{snapshot.eventCount.toLocaleString("pt-BR")} eventos no período</h2>
+          <p>
+            Contagem derivada somente de eventos persistidos dentro do workspace
+            autorizado e da janela selecionada.
+          </p>
+        </article>
+
+        <article className={styles.infoCard}>
+          <p className={styles.eyebrow}>Última importação</p>
+          {snapshot.latestImport ? (
+            <>
+              <h2>{snapshot.latestImport.status}</h2>
+              <p>{formatDate(snapshot.latestImport.createdAt)}</p>
+              <div className={styles.importStats}>
+                <div>
+                  <span className={styles.context}>Aceitas</span>
+                  <strong>{snapshot.latestImport.acceptedCount}</strong>
+                </div>
+                <div>
+                  <span className={styles.context}>Rejeitadas</span>
+                  <strong>{snapshot.latestImport.rejectedCount}</strong>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>Sem importações</h2>
+              <p>Ainda não existe batch persistido para este workspace.</p>
+            </>
+          )}
+        </article>
+      </section>
+
+      <footer className={styles.footer}>
+        <span>Command Center · Sprint 3</span>
+        <span>Tehkné Solutions</span>
+      </footer>
+    </main>
+  );
 }
 
 function WorkspaceSelectionPage({
@@ -216,12 +278,7 @@ function WorkspaceSelectionPage({
   to,
 }: Readonly<{
   operatorOrganizationId: string;
-  workspaces: readonly {
-    id: string;
-    name: string;
-    clientOrganizationId: string;
-    brandId: string | null;
-  }[];
+  workspaces: readonly CommandCenterWorkspaceOption[];
   from?: string;
   to?: string;
 }>) {
