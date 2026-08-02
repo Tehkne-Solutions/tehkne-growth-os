@@ -122,8 +122,19 @@ export async function activateDiscoveredConnectorAccount(
   const pendingTokens = await dependencies.secrets.get(attempt.tokenSecretRef);
   if (!pendingTokens) throw new Error("OAuth token bundle is unavailable.");
 
-  const connectionId = randomUUID();
-  const secretRef = `growth-connectors/connections/${connectionId}/tokens`;
+  const existing = await dependencies.database.$queryRaw<Array<{
+    connectionId: string;
+    secretRef: string | null;
+  }>>`
+    SELECT id AS "connectionId", secret_ref AS "secretRef"
+    FROM growth_connector_connections
+    WHERE workspace_id = ${input.workspaceId}::uuid
+      AND provider = ${attempt.provider}
+      AND external_account_id = ${input.account.externalAccountId}
+    LIMIT 1
+  `;
+  const connectionId = existing[0]?.connectionId ?? randomUUID();
+  const secretRef = existing[0]?.secretRef ?? `growth-connectors/connections/${connectionId}/tokens`;
   await dependencies.secrets.put(secretRef, pendingTokens);
   const now = input.now ?? new Date();
 
@@ -157,7 +168,7 @@ export async function activateDiscoveredConnectorAccount(
     `;
     return { connectionId: effectiveConnectionId, secretRef };
   } catch (error) {
-    await dependencies.secrets.delete(secretRef);
+    if (!existing[0]?.secretRef) await dependencies.secrets.delete(secretRef);
     throw error;
   }
 }
