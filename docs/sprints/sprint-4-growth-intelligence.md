@@ -95,7 +95,7 @@ Status: implementado e integrado à `main`.
 
 ## INT-11 — Goals UI
 
-Status: implementado neste incremento.
+Status: implementado e integrado à `main`.
 
 - cada KPI mostra Meta, Gap e Atingimento;
 - outcome semântico é apresentado como Melhorou, Piorou, Estável ou Requer contexto;
@@ -104,7 +104,7 @@ Status: implementado neste incremento.
 
 ## INT-12 — Decision Signals
 
-Status: implementado neste incremento.
+Status: implementado e integrado à `main`.
 
 - sinais derivados exclusivamente de `InterpretedCommandCenterMetric`;
 - prioridade determinística e explicável;
@@ -114,9 +114,23 @@ Status: implementado neste incremento.
 - métricas contextuais continuam explicitamente sem julgamento;
 - nenhum texto de sinal depende de LLM ou recomendação inventada.
 
+## INT-13 — Time Series & Momentum
+
+Status: domínio e loader autorizado implementados neste incremento.
+
+- seis janelas equivalentes e adjacentes compõem a série padrão;
+- o período selecionado continua sendo a unidade de comparação, evitando mistura de granularidades;
+- tendência numérica é classificada como `rising`, `falling`, `flat`, `mixed` ou `insufficient-data`;
+- momentum é classificado como `accelerating`, `decelerating`, `steady`, `reversal` ou `insufficient-data`;
+- desempenho continua separado da direção numérica e usa o `direction` do Sector Pack;
+- métricas contextuais permanecem `context-required`;
+- todas as janelas históricas reutilizam exclusivamente o `workspaceId` que já passou por `growth.command_center.read`;
+- testes verificam isolamento do workspace em todas as consultas históricas.
+
 ## Próximos incrementos
 
-- séries temporais multi-período;
+- renderizar sparklines reais e momentum no Command Center;
+- combinar momentum com Decision Signals sem esconder a regra de origem;
 - persistência opcional de sinais para histórico operacional;
 - regras de severidade configuráveis por Sector Pack;
 - recomendações explicáveis baseadas em playbooks declarativos;
@@ -124,6 +138,6 @@ Status: implementado neste incremento.
 
 ## Critério de saída
 
-Um usuário autorizado deve conseguir distinguir movimento de desempenho, comparar o período selecionado com baseline equivalente, avaliar e administrar metas reais do workspace e identificar prioridades derivadas de regras explícitas, sem mistura de tenant, porcentagens inválidas ou inferência semântica não declarada.
+Um usuário autorizado deve conseguir distinguir movimento de desempenho, comparar o período selecionado com baseline equivalente, avaliar e administrar metas reais do workspace, identificar prioridades derivadas de regras explícitas e consultar momentum multi-período sem mistura de tenant, porcentagens inválidas ou inferência semântica não declarada.
 
 Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.
