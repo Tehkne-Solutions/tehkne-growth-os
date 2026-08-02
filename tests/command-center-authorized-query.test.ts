@@ -12,21 +12,28 @@ const tenant = {
   workspaceId: "33333333-3333-4333-8333-333333333333",
 } as const;
 
-function createDatabase() {
+function createDatabaseHarness() {
+  const groupBy = vi.fn().mockResolvedValue([
+    { metricId: "leads", currency: null, _sum: { value: 9 } },
+  ]);
+  const count = vi.fn().mockResolvedValue(2);
+  const findFirst = vi.fn().mockResolvedValue(null);
+
   return {
-    metricObservation: {
-      groupBy: vi.fn().mockResolvedValue([
-        { metricId: "leads", currency: null, _sum: { value: 9 } },
-      ]),
-    },
-    growthEvent: { count: vi.fn().mockResolvedValue(2) },
-    metricImportBatch: { findFirst: vi.fn().mockResolvedValue(null) },
-  } as never;
+    database: {
+      metricObservation: { groupBy },
+      growthEvent: { count },
+      metricImportBatch: { findFirst },
+    } as never,
+    groupBy,
+    count,
+    findFirst,
+  };
 }
 
 describe("authorized command center query", () => {
   it("queries only after a covering membership grants command center read", async () => {
-    const database = createDatabase();
+    const { database, groupBy } = createDatabaseHarness();
     const authorizationStore = {
       listActiveMemberships: vi.fn().mockResolvedValue([
         {
@@ -53,7 +60,7 @@ describe("authorized command center query", () => {
     );
 
     expect(snapshot.workspaceId).toBe(tenant.workspaceId);
-    expect(database.metricObservation.groupBy).toHaveBeenCalledWith(
+    expect(groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ workspaceId: tenant.workspaceId }),
       }),
@@ -62,7 +69,7 @@ describe("authorized command center query", () => {
   });
 
   it("denies access before any growth query when permission is absent", async () => {
-    const database = createDatabase();
+    const { database, groupBy, count } = createDatabaseHarness();
     const authorizationStore = {
       listActiveMemberships: vi.fn().mockResolvedValue([]),
       getRolePermissionsForGrant: vi.fn(),
@@ -81,12 +88,13 @@ describe("authorized command center query", () => {
       ),
     ).rejects.toBeInstanceOf(AuthorizationDeniedError);
 
-    expect(database.metricObservation.groupBy).not.toHaveBeenCalled();
-    expect(database.growthEvent.count).not.toHaveBeenCalled();
+    expect(groupBy).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
     expect(authorizationStore.recordAuthorizationDenial).toHaveBeenCalledOnce();
   });
 
   it("requires workspace scope before authorization", async () => {
+    const { database } = createDatabaseHarness();
     const authorizationStore = {
       listActiveMemberships: vi.fn(),
       getRolePermissionsForGrant: vi.fn(),
@@ -95,7 +103,7 @@ describe("authorized command center query", () => {
 
     await expect(
       loadAuthorizedCommandCenterSnapshot(
-        { database: createDatabase(), authorizationStore },
+        { database, authorizationStore },
         {
           userId: "44444444-4444-4444-8444-444444444444",
           tenant: {
