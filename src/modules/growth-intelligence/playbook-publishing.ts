@@ -50,10 +50,17 @@ export function canTransitionPlaybookPublication(
 
 export function nextPatchVersion(version: string): string {
   const parts = version.split(".").map(Number);
-  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part) || part < 0)) {
+  const [major, minor, patch] = parts;
+  if (
+    parts.length !== 3 ||
+    major === undefined ||
+    minor === undefined ||
+    patch === undefined ||
+    parts.some((part) => !Number.isInteger(part) || part < 0)
+  ) {
     throw new PlaybookPublicationValidationError("Rule version must be semantic versioning.");
   }
-  return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+  return `${major}.${minor}.${patch + 1}`;
 }
 
 export function buildRollbackRule(
