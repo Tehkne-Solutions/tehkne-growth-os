@@ -19,12 +19,18 @@ export function previewMetricCsv(
   workspaceId: string,
   idFactory: (row: number) => string,
 ): CsvImportPreview {
-  const lines = input.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length === 0) throw new Error("CSV is empty");
+  const lines = input
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0);
+  const headerLine = lines[0];
+  if (headerLine === undefined) throw new Error("CSV is empty");
 
-  const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+  const headers = splitCsvLine(headerLine).map((header) => header.trim());
   for (const required of requiredHeaders) {
-    if (!headers.includes(required)) throw new Error(`Missing CSV header: ${required}`);
+    if (!headers.includes(required)) {
+      throw new Error(`Missing CSV header: ${required}`);
+    }
   }
 
   const accepted: MetricObservation[] = [];
@@ -32,8 +38,12 @@ export function previewMetricCsv(
 
   for (let index = 1; index < lines.length; index += 1) {
     const raw = lines[index];
+    if (raw === undefined) continue;
+
     const values = splitCsvLine(raw);
-    const row = Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ""])) as CsvMetricRow;
+    const row = Object.fromEntries(
+      headers.map((header, column) => [header, values[column] ?? ""]),
+    ) as CsvMetricRow;
 
     try {
       accepted.push(parseMetricCsvRow(row, workspaceId, idFactory(index + 1)));
