@@ -35,6 +35,9 @@ export async function setMetricGoal(
   if (!tenant.workspaceId || !tenant.clientOrganizationId) {
     throw new MetricGoalWorkspaceRequiredError();
   }
+  const workspaceId = tenant.workspaceId;
+  const clientOrganizationId = tenant.clientOrganizationId;
+
   if (!Number.isFinite(input.targetValue)) {
     throw new MetricGoalValidationError("Metric goal target must be finite.");
   }
@@ -49,7 +52,7 @@ export async function setMetricGoal(
   });
 
   const committedPack = await dependencies.database.metricImportBatch.findFirst({
-    where: { workspaceId: tenant.workspaceId, status: "COMMITTED" },
+    where: { workspaceId, status: "COMMITTED" },
     orderBy: { committedAt: "desc" },
     select: { sectorPackId: true, sectorPackVersion: true },
   });
@@ -70,7 +73,7 @@ export async function setMetricGoal(
   const currency = normalizeCurrency(input.currency);
   const previousGoal = await dependencies.database.metricGoal.findFirst({
     where: {
-      workspaceId: tenant.workspaceId,
+      workspaceId,
       sectorPackId: pack.id,
       sectorPackVersion: pack.version,
       metricId: input.metricId,
@@ -100,7 +103,7 @@ export async function setMetricGoal(
     const goal = await transaction.metricGoal.create({
       data: {
         id,
-        workspaceId: tenant.workspaceId!,
+        workspaceId,
         sectorPackId: pack.id,
         sectorPackVersion: pack.version,
         metricId: input.metricId,
@@ -113,8 +116,8 @@ export async function setMetricGoal(
     await transaction.auditEvent.create({
       data: {
         operatorOrganizationId: tenant.operatorOrganizationId,
-        clientOrganizationId: tenant.clientOrganizationId,
-        workspaceId: tenant.workspaceId,
+        clientOrganizationId,
+        workspaceId,
         actorUserId: input.userId,
         action: previousGoal ? "growth.metric_goal.replaced" : "growth.metric_goal.created",
         resourceType: "metric_goal",
