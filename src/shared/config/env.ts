@@ -26,3 +26,11 @@ export function parseServerEnvironment(
 ): ServerEnvironment {
   return serverEnvironmentSchema.parse(input);
 }
+
+export function requireSessionSecret(environment: ServerEnvironment): string {
+  if (!environment.SESSION_SECRET) {
+    throw new Error("SESSION_SECRET is required by identity operations.");
+  }
+
+  return environment.SESSION_SECRET;
+}

@@ -34,6 +34,13 @@ enum WorkspaceKind {
   INTERNAL
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
 model OperatorOrganization {
   id          String       @id @default(uuid()) @db.Uuid
   slug        String       @unique @db.VarChar(80)
@@ -49,6 +56,7 @@ model OperatorOrganization {
   roles       Role[]
   memberships Membership[]
   auditEvents AuditEvent[]
+  invitations Invitation[]
 
   @@map("operator_organizations")
 }
@@ -71,6 +79,7 @@ model ClientOrganization {
   workspaces           Workspace[]
   memberships          Membership[]
   auditEvents          AuditEvent[]
+  invitations          Invitation[]
 
   @@unique([operatorOrganizationId, slug])
   @@unique([id, operatorOrganizationId])
@@ -92,6 +101,7 @@ model Brand {
   clientOrganization   ClientOrganization   @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
   workspaces           Workspace[]
   memberships          Membership[]
+  invitations          Invitation[]
 
   @@unique([clientOrganizationId, slug])
   @@unique([id, clientOrganizationId, operatorOrganizationId])
@@ -116,6 +126,7 @@ model Workspace {
   brand                Brand?               @relation(fields: [brandId], references: [id], onDelete: Restrict)
   memberships          Membership[]
   auditEvents          AuditEvent[]
+  invitations          Invitation[]
 
   @@unique([clientOrganizationId, slug])
   @@unique([id, clientOrganizationId, operatorOrganizationId])
@@ -133,6 +144,10 @@ model User {
 
   memberships Membership[]
   auditEvents AuditEvent[] @relation("AuditActor")
+  passwordCredential PasswordCredential?
+  sessions Session[]
+  invitationsSent Invitation[] @relation("InvitationInviter")
+  invitationsAccepted Invitation[] @relation("InvitationAcceptor")
 
   @@map("users")
 }
@@ -150,6 +165,7 @@ model Role {
   operatorOrganization OperatorOrganization? @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
   memberships          Membership[]
   permissions          RolePermission[]
+  invitations          Invitation[]
 
   @@unique([operatorOrganizationId, code])
   @@map("roles")
@@ -197,11 +213,80 @@ model Membership {
   clientOrganization   ClientOrganization?  @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
   brand                Brand?               @relation(fields: [brandId], references: [id], onDelete: Restrict)
   workspace            Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  invitation           Invitation?
 
   @@unique([userId, roleId, operatorOrganizationId, clientOrganizationId, brandId, workspaceId], map: "memberships_scope_identity_key")
   @@index([userId, status])
   @@index([operatorOrganizationId, clientOrganizationId, workspaceId, status])
   @@map("memberships")
+}
+
+model PasswordCredential {
+  userId            String    @id @map("user_id") @db.Uuid
+  passwordHash      String    @map("password_hash") @db.Text
+  failedAttempts    Int       @default(0) @map("failed_attempts")
+  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
+  passwordChangedAt DateTime  @default(now()) @map("password_changed_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_credentials")
+}
+
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash") @db.Char(64)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason  String?   @map("revoke_reason") @db.VarChar(120)
+  userAgentHash String?   @map("user_agent_hash") @db.Char(64)
+  ipPrefix      String?   @map("ip_prefix") @db.VarChar(64)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Invitation {
+  id                     String           @id @default(uuid()) @db.Uuid
+  tokenHash              String           @unique @map("token_hash") @db.Char(64)
+  email                  String           @db.VarChar(320)
+  roleId                 String           @map("role_id") @db.Uuid
+  operatorOrganizationId String           @map("operator_organization_id") @db.Uuid
+  clientOrganizationId   String?          @map("client_organization_id") @db.Uuid
+  brandId                String?          @map("brand_id") @db.Uuid
+  workspaceId            String?          @map("workspace_id") @db.Uuid
+  scope                   MembershipScope
+  status                  InvitationStatus @default(PENDING)
+  expiresAt               DateTime         @map("expires_at") @db.Timestamptz(6)
+  acceptedAt              DateTime?        @map("accepted_at") @db.Timestamptz(6)
+  revokedAt               DateTime?        @map("revoked_at") @db.Timestamptz(6)
+  invitedByUserId         String           @map("invited_by_user_id") @db.Uuid
+  acceptedByUserId        String?          @map("accepted_by_user_id") @db.Uuid
+  membershipId            String?          @unique @map("membership_id") @db.Uuid
+  createdAt               DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  role                 Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  clientOrganization   ClientOrganization?  @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
+  brand                Brand?               @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  workspace            Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  invitedByUser        User                 @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedByUser       User?                @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+  membership           Membership?          @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@index([email, status, expiresAt])
+  @@index([operatorOrganizationId, clientOrganizationId, workspaceId, status])
+  @@map("invitations")
 }
 
 model AuditEvent {

@@ -21,6 +21,7 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/growth_os?schema=public
       APP_URL: http://localhost:3000
       NODE_ENV: test
+      SESSION_SECRET: ci-only-session-secret-with-at-least-32-characters
 
     steps:
       - name: Checkout

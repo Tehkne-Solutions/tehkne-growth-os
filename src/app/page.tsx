@@ -21,7 +21,31 @@ const foundations = [
     id: "FND-04",
     title: "Tenancy",
     state: "Implementado",
-    detail: "Operadora, cliente, marca, workspace, RBAC e auditoria.",
+    detail: "Operadora, cliente, marca, workspace e auditoria.",
+  },
+  {
+    id: "FND-05",
+    title: "Autenticação",
+    state: "Implementado",
+    detail: "Credenciais scrypt e login validado exclusivamente no servidor.",
+  },
+  {
+    id: "FND-06",
+    title: "Sessões",
+    state: "Implementado",
+    detail: "Tokens opacos, expiração, revogação e cookies protegidos.",
+  },
+  {
+    id: "FND-07",
+    title: "Convites",
+    state: "Implementado",
+    detail: "Uso único, escopo fechado, expiração e ativação transacional.",
+  },
+  {
+    id: "FND-08",
+    title: "RBAC",
+    state: "Implementado",
+    detail: "Herança hierárquica e bloqueio de escalada de privilégios.",
   },
 ] as const;
 
@@ -47,7 +71,7 @@ export default function FoundationPage() {
         <div className="sectionHeading">
           <div>
             <p className="eyebrow">Fundação verificável</p>
-            <h2 id="foundation-title">FND-01–FND-04</h2>
+            <h2 id="foundation-title">FND-01–FND-08</h2>
           </div>
           <p>Nenhuma métrica de cliente é simulada nesta etapa.</p>
         </div>
