@@ -1,0 +1,52 @@
+{
+  "sectorPackId": "growth-services",
+  "sectorPackVersion": "1.0.0",
+  "rules": [
+    {
+      "id": "cpl-critical-review",
+      "version": "1.0.0",
+      "name": "Revisar aquisição quando CPL degrada",
+      "status": "active",
+      "priority": 100,
+      "when": {
+        "metricId": "cpl",
+        "severity": "critical",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-acquisition-efficiency",
+        "title": "Revisar eficiência de aquisição",
+        "rationale": "CPL acima da meta e em trajetória adversa pede diagnóstico de mídia, mensagem e conversão antes de escalar verba.",
+        "checklist": [
+          "Comparar CPL por campanha e criativo",
+          "Verificar CTR, CPC e frequência",
+          "Revisar conversão da landing page",
+          "Comparar qualidade dos leads por origem"
+        ]
+      }
+    },
+    {
+      "id": "conversion-warning-review",
+      "version": "1.0.0",
+      "name": "Investigar deterioração de conversão",
+      "status": "active",
+      "priority": 85,
+      "when": {
+        "metricId": "conversion_rate",
+        "severity": "warning",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-conversion-path",
+        "title": "Revisar o caminho de conversão",
+        "rationale": "Queda de conversão deve ser localizada por etapa antes de atribuir causa a tráfego, oferta ou atendimento.",
+        "checklist": [
+          "Comparar conversão por origem",
+          "Revisar páginas e formulários",
+          "Checar tempo de resposta e follow-up",
+          "Identificar mudanças recentes de oferta ou mensagem"
+        ]
+      }
+    }
+  ]
+}
