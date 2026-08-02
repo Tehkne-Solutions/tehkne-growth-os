@@ -7,10 +7,9 @@ import {
   validateSession,
 } from "@/modules/identity";
 import { getSessionCookieName } from "@/modules/identity/http/security";
-import {
-  loadAuthorizedInterpretedCommandCenterIntelligence,
-} from "@/modules/growth-intelligence/authorized-intelligence";
-import { listGrowthActions } from "@/modules/growth-intelligence/action-workflow";
+import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/authorized-intelligence";
+import { listGrowthActions, type GrowthActionItem } from "@/modules/growth-intelligence/action-workflow";
+import type { PlaybookRecommendation } from "@/modules/growth-intelligence/playbook-engine";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -20,13 +19,51 @@ import styles from "../action-workspace.module.css";
 
 type SearchValue = string | string[] | undefined;
 type PageProps = { searchParams: Promise<Record<string, SearchValue>> };
+type WorkspaceContext = {
+  tenant: {
+    operatorOrganizationId: string;
+    clientOrganizationId: string;
+    brandId?: string;
+    workspaceId: string;
+  };
+  from: Date;
+  to: Date;
+};
+
+type PageState =
+  | { kind: "context-required" }
+  | { kind: "authentication-required" }
+  | { kind: "forbidden" }
+  | { kind: "unavailable" }
+  | {
+      kind: "ready";
+      context: WorkspaceContext;
+      recommendations: readonly PlaybookRecommendation[];
+      actions: readonly GrowthActionItem[];
+      backQuery: string;
+    };
 
 export default async function ActionWorkspacePage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const context = readContext(params);
-  if (!context) {
-    return <StatePage title="Contexto incompleto" detail="Abra primeiro um workspace e período no Command Center para acessar a fila operacional." />;
+  const state = await resolveState(params);
+
+  switch (state.kind) {
+    case "context-required":
+      return <StatePage title="Contexto incompleto" detail="Abra primeiro um workspace e período no Command Center para acessar a fila operacional." />;
+    case "authentication-required":
+      return <StatePage title="Autenticação necessária" detail="Entre novamente antes de operar ações de Growth." />;
+    case "forbidden":
+      return <StatePage title="Acesso não autorizado" detail="Sua membership não concede leitura deste workspace." />;
+    case "unavailable":
+      return <StatePage title="Action Workspace indisponível" detail="Não foi possível carregar recomendações e ações persistidas." />;
+    case "ready":
+      return <ReadyPage state={state} />;
   }
+}
+
+async function resolveState(params: Record<string, SearchValue>): Promise<PageState> {
+  const context = readContext(params);
+  if (!context) return { kind: "context-required" };
 
   try {
     const environment = parseServerEnvironment(process.env);
@@ -39,44 +76,49 @@ export default async function ActionWorkspacePage({ searchParams }: PageProps) {
     const identityRepository = new PrismaIdentityRepository(database);
     const session = await validateSession(identityRepository, token, secret);
     const tenant = parseTenantContext(context.tenant);
-
     const intelligence = await loadAuthorizedInterpretedCommandCenterIntelligence(
       { database, authorizationStore: identityRepository },
       { userId: session.userId, tenant, from: context.from, to: context.to },
     );
     const actions = await listGrowthActions(database, context.tenant.workspaceId);
 
-    return (
-      <main className={styles.page}>
-        <header className={styles.header}>
-          <div>
-            <p className={styles.eyebrow}>Tehkné Growth OS · Action Workspace</p>
-            <h1 className={styles.title}>Recomendações explicáveis, trabalho humano e rastreabilidade.</h1>
-          </div>
-          <div>
-            <div className={styles.period}>{formatDate(context.from)} — {formatDate(context.to)}</div>
-            <a className={styles.backLink} href={`/command-center?${toSearchParams(params)}`}>Voltar ao Command Center</a>
-          </div>
-        </header>
-
-        <ActionWorkspace
-          tenant={context.tenant}
-          from={context.from.toISOString()}
-          to={context.to.toISOString()}
-          recommendations={intelligence.recommendations}
-          initialActions={actions}
-        />
-      </main>
-    );
+    return {
+      kind: "ready",
+      context,
+      recommendations: intelligence.recommendations,
+      actions,
+      backQuery: toSearchParams(params),
+    };
   } catch (error) {
-    if (error instanceof InvalidSessionError) {
-      return <StatePage title="Autenticação necessária" detail="Entre novamente antes de operar ações de Growth." />;
-    }
-    if (error instanceof AuthorizationDeniedError) {
-      return <StatePage title="Acesso não autorizado" detail="Sua membership não concede leitura deste workspace." />;
-    }
-    return <StatePage title="Action Workspace indisponível" detail="Não foi possível carregar recomendações e ações persistidas." />;
+    if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
+    if (error instanceof AuthorizationDeniedError) return { kind: "forbidden" };
+    return { kind: "unavailable" };
   }
+}
+
+function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "ready" }> }>) {
+  return (
+    <main className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.eyebrow}>Tehkné Growth OS · Action Workspace</p>
+          <h1 className={styles.title}>Recomendações explicáveis, trabalho humano e rastreabilidade.</h1>
+        </div>
+        <div>
+          <div className={styles.period}>{formatDate(state.context.from)} — {formatDate(state.context.to)}</div>
+          <a className={styles.backLink} href={`/command-center?${state.backQuery}`}>Voltar ao Command Center</a>
+        </div>
+      </header>
+
+      <ActionWorkspace
+        tenant={state.context.tenant}
+        from={state.context.from.toISOString()}
+        to={state.context.to.toISOString()}
+        recommendations={state.recommendations}
+        initialActions={state.actions}
+      />
+    </main>
+  );
 }
 
 function StatePage({ title, detail }: Readonly<{ title: string; detail: string }>) {
@@ -92,7 +134,7 @@ function StatePage({ title, detail }: Readonly<{ title: string; detail: string }
   );
 }
 
-function readContext(params: Record<string, SearchValue>) {
+function readContext(params: Record<string, SearchValue>): WorkspaceContext | null {
   const operatorOrganizationId = first(params.operatorOrganizationId);
   const encoded = first(params.workspaceContext);
   const decoded = encoded ? decodeWorkspaceContext(encoded) : null;
