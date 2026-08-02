@@ -47,7 +47,7 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
       const response = await fetch("/api/growth/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "materialize", tenant, recommendationKey, from, to }),
+        body: JSON.stringify({ intent: "materialize", tenant, recommendationKey, from, to }),
       });
       if (!response.ok) throw new Error(await readError(response));
       const action = await response.json() as GrowthActionItem;
@@ -67,7 +67,7 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
       const response = await fetch("/api/growth/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "transition", tenant, actionId, status }),
+        body: JSON.stringify({ intent: "transition", tenant, actionId, status }),
       });
       if (!response.ok) throw new Error(await readError(response));
       const action = await response.json() as GrowthActionItem;
@@ -115,13 +115,8 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
                   {existing ? (
                     <span className={styles.status} data-status={existing.status}>{statusLabels[existing.status]}</span>
                   ) : (
-                    <button
-                      className={styles.primary}
-                      type="button"
-                      disabled={busyKey === `create:${recommendation.key}`}
-                      onClick={() => materialize(recommendation.key)}
-                    >
-                      {busyKey === `create:${recommendation.key}` ? "Criando…" : "Criar ação"}
+                    <button className={styles.primary} type="button" disabled={busyKey === keyForCreate(recommendation.key)} onClick={() => materialize(recommendation.key)}>
+                      {busyKey === keyForCreate(recommendation.key) ? "Criando…" : "Criar ação"}
                     </button>
                   )}
                 </article>
@@ -153,7 +148,7 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
                       key={status}
                       type="button"
                       className={status === "REJECTED" ? styles.secondary : styles.primary}
-                      disabled={busyKey === `transition:${action.id}:${status}`}
+                      disabled={busyKey === keyForTransition(action.id, status)}
                       onClick={() => transition(action.id, status)}
                     >
                       {transitionLabel(status)}
@@ -167,6 +162,14 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
       </div>
     </section>
   );
+}
+
+function keyForCreate(recommendationKey: string): string {
+  return `create:${recommendationKey}`;
+}
+
+function keyForTransition(actionId: string, status: GrowthActionStatus): string {
+  return `transition:${actionId}:${status}`;
 }
 
 function nextStatuses(status: GrowthActionStatus): GrowthActionStatus[] {
