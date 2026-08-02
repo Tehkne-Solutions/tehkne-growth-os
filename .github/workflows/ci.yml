@@ -17,6 +17,20 @@ jobs:
     name: Validate, test and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: growth_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d growth_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/growth_os?schema=public
       APP_URL: http://localhost:3000
@@ -41,6 +55,9 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run db:generate
+
+      - name: Apply PostgreSQL migrations
+        run: npm run db:migrate:deploy
 
       - name: Lint
         run: npm run lint
