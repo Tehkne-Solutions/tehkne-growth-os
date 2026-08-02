@@ -35,8 +35,6 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
     to: Date;
   }>,
 ): Promise<AuthorizedInterpretedCommandCenterIntelligence> {
-  // Authorization is performed once by the canonical Command Center loader.
-  // All historical reads below reuse only the workspaceId returned by that authorized result.
   const intelligence = await loadAuthorizedCommandCenterIntelligence(dependencies, input);
   const olderPeriods = buildOlderEquivalentPeriods({
     from: intelligence.previous.from,
@@ -92,6 +90,8 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
     loadDeclarativePlaybook({
       sectorPackId: committedPack.sectorPackId,
       sectorPackVersion: committedPack.sectorPackVersion,
+      database: dependencies.database,
+      workspaceId: intelligence.workspaceId,
     }),
   ]);
   const directions = new Map(sectorPack.metrics.map((metric) => [metric.id, metric.direction]));
