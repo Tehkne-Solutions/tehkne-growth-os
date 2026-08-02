@@ -32,6 +32,15 @@ export type PlaybookReviewProposal = Readonly<{
 export class PlaybookReviewValidationError extends Error {}
 export class PlaybookReviewNotFoundError extends Error {}
 
+export function canTransitionPlaybookReview(
+  from: PlaybookReviewStatus,
+  to: Exclude<PlaybookReviewStatus, "DRAFT">,
+): boolean {
+  if (from === "DRAFT") return to === "SUBMITTED";
+  if (from === "SUBMITTED") return to === "APPROVED" || to === "REJECTED";
+  return false;
+}
+
 export async function createPlaybookReviewProposal(
   dependencies: Readonly<{ database: DatabaseClient; authorizationStore: AuthorizationMembershipStore }>,
   input: Readonly<{
@@ -108,10 +117,9 @@ export async function transitionPlaybookReviewProposal(
   const existing = await findProposal(dependencies.database, tenant.workspaceId, input.proposalId);
   if (!existing) throw new PlaybookReviewNotFoundError("Playbook review proposal not found in this workspace.");
 
-  const allowed = existing.status === "DRAFT"
-    ? input.status === "SUBMITTED"
-    : existing.status === "SUBMITTED" && (input.status === "APPROVED" || input.status === "REJECTED");
-  if (!allowed) throw new PlaybookReviewValidationError(`Invalid review transition ${existing.status} -> ${input.status}.`);
+  if (!canTransitionPlaybookReview(existing.status, input.status)) {
+    throw new PlaybookReviewValidationError(`Invalid review transition ${existing.status} -> ${input.status}.`);
+  }
   if ((input.status === "APPROVED" || input.status === "REJECTED") && existing.createdByUserId === input.userId) {
     throw new PlaybookReviewValidationError("A proposal cannot be reviewed by its creator.");
   }
