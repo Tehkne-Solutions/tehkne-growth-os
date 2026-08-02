@@ -1,0 +1,22 @@
+{
+  "id": "growth-services",
+  "version": "1.0.0",
+  "name": "Growth Services",
+  "status": "active",
+  "funnels": [
+    {
+      "id": "acquisition",
+      "name": "Aquisição",
+      "stages": ["impression", "visit", "lead", "qualified_lead", "opportunity", "customer"]
+    }
+  ],
+  "metrics": [
+    {"id": "impressions", "name": "Impressões", "unit": "count", "direction": "up"},
+    {"id": "clicks", "name": "Cliques", "unit": "count", "direction": "up"},
+    {"id": "leads", "name": "Leads", "unit": "count", "direction": "up"},
+    {"id": "spend", "name": "Investimento", "unit": "currency", "direction": "contextual"},
+    {"id": "cpl", "name": "Custo por lead", "unit": "currency", "direction": "down"},
+    {"id": "conversion_rate", "name": "Taxa de conversão", "unit": "percentage", "direction": "up"}
+  ],
+  "events": ["impression_recorded", "visit_recorded", "lead_created", "lead_qualified", "opportunity_created", "customer_acquired", "media_spend_recorded"]
+}

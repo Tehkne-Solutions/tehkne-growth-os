@@ -1,0 +1,22 @@
+{
+  "id": "creative-services",
+  "version": "1.0.0",
+  "name": "Creative Services",
+  "status": "active",
+  "funnels": [
+    {
+      "id": "commercial",
+      "name": "Comercial",
+      "stages": ["audience", "lead", "briefing", "proposal", "won"]
+    }
+  ],
+  "metrics": [
+    {"id": "leads", "name": "Leads", "unit": "count", "direction": "up"},
+    {"id": "briefings", "name": "Briefings", "unit": "count", "direction": "up"},
+    {"id": "proposals", "name": "Propostas", "unit": "count", "direction": "up"},
+    {"id": "wins", "name": "Negócios ganhos", "unit": "count", "direction": "up"},
+    {"id": "cpl", "name": "Custo por lead", "unit": "currency", "direction": "down"},
+    {"id": "win_rate", "name": "Taxa de fechamento", "unit": "percentage", "direction": "up"}
+  ],
+  "events": ["lead_created", "briefing_created", "proposal_sent", "deal_won", "deal_lost", "media_spend_recorded"]
+}
