@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto";
 import { loadCommandCenterSnapshot } from "@/modules/command-center/query";
 import { authorize } from "@/modules/identity";
 import type { AuthorizationMembershipStore } from "@/modules/identity/application/contracts";
+import { loadSectorPackManifest } from "@/modules/sector-packs/load-manifest";
 import { parseTenantContext, type TenantContext } from "@/modules/tenancy";
 import type { DatabaseClient } from "@/shared/db/client";
 
 import { GROWTH_INTELLIGENCE_PERMISSIONS } from "./permissions";
-import { loadSectorPackManifest } from "./sector-pack-loader";
 import { interpretMetricMovement } from "./semantics";
 
 export type ActionEffectivenessOutcome =
@@ -82,7 +82,7 @@ export async function evaluateCompletedGrowthAction(
     throw new ActionEffectivenessValidationError("Only completed actions can be evaluated.");
   }
 
-  const pack = await loadSectorPackManifest(action.sectorPackId, action.sectorPackVersion);
+  const pack = await loadSectorPackManifest({ id: action.sectorPackId, version: action.sectorPackVersion });
   const metric = pack.metrics.find((item) => item.id === input.metricId);
   if (!metric) throw new ActionEffectivenessValidationError("Metric is not declared by the action Sector Pack.");
 
