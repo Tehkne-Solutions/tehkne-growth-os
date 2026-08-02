@@ -7,6 +7,7 @@ import {
   validateSession,
 } from "@/modules/identity";
 import { loadAuthorizedCommandCenterSnapshot } from "@/modules/command-center/authorized-query";
+import { listAuthorizedCommandCenterWorkspaces } from "@/modules/command-center/workspaces";
 import { getSessionCookieName } from "@/modules/identity/http/security";
 import { parseTenantContext } from "@/modules/tenancy";
 import {
@@ -26,13 +27,13 @@ export default async function CommandCenterPage({
   searchParams,
 }: CommandCenterPageProps) {
   const params = await searchParams;
-  const context = readContext(params);
-  if (!context) {
+  const operatorOrganizationId = first(params.operatorOrganizationId);
+  if (!operatorOrganizationId) {
     return (
       <StatePage
-        title="Selecione um workspace"
-        detail="O Command Center só consulta dados depois que um contexto completo de operadora, cliente, workspace e período é informado e autorizado."
-        code="operatorOrganizationId · clientOrganizationId · workspaceId · from · to"
+        title="Selecione uma operadora"
+        detail="O Command Center começa em um contexto de tenant explícito. Informe a operadora para descobrir apenas os workspaces permitidos pela sua membership."
+        code="operatorOrganizationId"
       />
     );
   }
@@ -49,6 +50,24 @@ export default async function CommandCenterPage({
     const database = getDatabase();
     const identityRepository = new PrismaIdentityRepository(database);
     const session = await validateSession(identityRepository, token, secret);
+    const context = readContext(params, operatorOrganizationId);
+
+    if (!context) {
+      const workspaces = await listAuthorizedCommandCenterWorkspaces(
+        { database, authorizationStore: identityRepository },
+        { userId: session.userId, operatorOrganizationId },
+      );
+
+      return (
+        <WorkspaceSelectionPage
+          operatorOrganizationId={operatorOrganizationId}
+          workspaces={workspaces}
+          from={first(params.from)}
+          to={first(params.to)}
+        />
+      );
+    }
+
     const tenant = parseTenantContext({
       operatorOrganizationId: context.operatorOrganizationId,
       clientOrganizationId: context.clientOrganizationId,
@@ -72,7 +91,12 @@ export default async function CommandCenterPage({
             <span className={styles.brandMark} />
             Tehkné Growth OS
           </div>
-          <span className={styles.context}>Workspace {snapshot.workspaceId}</span>
+          <a
+            className={styles.contextLink}
+            href={`/command-center?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`}
+          >
+            Trocar workspace
+          </a>
         </div>
 
         <section className={styles.hero}>
@@ -185,6 +209,90 @@ export default async function CommandCenterPage({
   }
 }
 
+function WorkspaceSelectionPage({
+  operatorOrganizationId,
+  workspaces,
+  from,
+  to,
+}: Readonly<{
+  operatorOrganizationId: string;
+  workspaces: readonly {
+    id: string;
+    name: string;
+    clientOrganizationId: string;
+    brandId: string | null;
+  }[];
+  from?: string;
+  to?: string;
+}>) {
+  const defaults = defaultPeriod(from, to);
+
+  return (
+    <main className={styles.page}>
+      <div className={styles.topbar}>
+        <div className={styles.brand}>
+          <span className={styles.brandMark} />
+          Tehkné Growth OS
+        </div>
+        <span className={styles.context}>Workspace autorizado</span>
+      </div>
+
+      <section className={styles.selectorCard}>
+        <p className={styles.eyebrow}>Command Center</p>
+        <h1 className={styles.selectorTitle}>Escolha onde operar.</h1>
+        <p className={styles.selectorCopy}>
+          A lista abaixo é derivada das suas memberships ativas e da permissão
+          <code> growth.command_center.read</code>.
+        </p>
+
+        {workspaces.length > 0 ? (
+          <form className={styles.selectorForm} method="GET" action="/command-center">
+            <input
+              type="hidden"
+              name="operatorOrganizationId"
+              value={operatorOrganizationId}
+            />
+            <label className={styles.field}>
+              <span>Workspace</span>
+              <select name="workspaceContext" required defaultValue="">
+                <option value="" disabled>
+                  Selecione um workspace
+                </option>
+                {workspaces.map((workspace) => (
+                  <option
+                    key={workspace.id}
+                    value={encodeWorkspaceContext(workspace)}
+                  >
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className={styles.dateGrid}>
+              <label className={styles.field}>
+                <span>De</span>
+                <input type="date" name="from" defaultValue={defaults.from} required />
+              </label>
+              <label className={styles.field}>
+                <span>Até</span>
+                <input type="date" name="to" defaultValue={defaults.to} required />
+              </label>
+            </div>
+            <button className={styles.primaryButton} type="submit">
+              Abrir Command Center
+            </button>
+          </form>
+        ) : (
+          <div className={styles.emptyBox}>
+            Nenhum workspace ativo com permissão de leitura foi encontrado nesta
+            operadora.
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function StatePage({
   title,
   detail,
@@ -202,28 +310,25 @@ function StatePage({
   );
 }
 
-function readContext(params: Record<string, SearchValue>) {
-  const operatorOrganizationId = first(params.operatorOrganizationId);
-  const clientOrganizationId = first(params.clientOrganizationId);
-  const workspaceId = first(params.workspaceId);
-  const brandId = first(params.brandId);
+function readContext(
+  params: Record<string, SearchValue>,
+  operatorOrganizationId: string,
+) {
+  const encodedWorkspace = first(params.workspaceContext);
+  const decodedWorkspace = encodedWorkspace
+    ? decodeWorkspaceContext(encodedWorkspace)
+    : null;
+  const clientOrganizationId =
+    decodedWorkspace?.clientOrganizationId ?? first(params.clientOrganizationId);
+  const workspaceId = decodedWorkspace?.workspaceId ?? first(params.workspaceId);
+  const brandId = decodedWorkspace?.brandId ?? first(params.brandId);
   const fromRaw = first(params.from);
   const toRaw = first(params.to);
-  if (
-    !operatorOrganizationId ||
-    !clientOrganizationId ||
-    !workspaceId ||
-    !fromRaw ||
-    !toRaw
-  ) {
-    return null;
-  }
+  if (!clientOrganizationId || !workspaceId || !fromRaw || !toRaw) return null;
 
-  const from = new Date(fromRaw);
-  const to = new Date(toRaw);
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
-    return null;
-  }
+  const from = startOfUtcDay(fromRaw);
+  const to = endOfUtcDay(toRaw);
+  if (!from || !to || to < from) return null;
 
   return {
     operatorOrganizationId,
@@ -233,6 +338,48 @@ function readContext(params: Record<string, SearchValue>) {
     from,
     to,
   };
+}
+
+function encodeWorkspaceContext(workspace: {
+  id: string;
+  clientOrganizationId: string;
+  brandId: string | null;
+}) {
+  return [workspace.id, workspace.clientOrganizationId, workspace.brandId ?? ""].join(":");
+}
+
+function decodeWorkspaceContext(value: string) {
+  const [workspaceId, clientOrganizationId, brandId = ""] = value.split(":");
+  if (!workspaceId || !clientOrganizationId) return null;
+  return {
+    workspaceId,
+    clientOrganizationId,
+    brandId: brandId || undefined,
+  };
+}
+
+function defaultPeriod(from?: string, to?: string) {
+  if (from && to) return { from, to };
+  const today = new Date();
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  return {
+    from: formatInputDate(start),
+    to: formatInputDate(today),
+  };
+}
+
+function startOfUtcDay(value: string): Date | null {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function endOfUtcDay(value: string): Date | null {
+  const date = new Date(`${value}T23:59:59.999Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatInputDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 function first(value: SearchValue): string | undefined {
