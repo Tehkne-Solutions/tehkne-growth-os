@@ -136,6 +136,7 @@ model Workspace {
   growthEvents         GrowthEvent[]
   metricObservations   MetricObservation[]
   metricImportBatches  MetricImportBatch[]
+  metricGoals          MetricGoal[]
 
   @@unique([clientOrganizationId, slug])
   @@unique([id, clientOrganizationId, operatorOrganizationId])
@@ -343,17 +344,17 @@ model GrowthEvent {
 }
 
 model MetricObservation {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  importBatchId String? @map("import_batch_id") @db.Uuid
-  metricId    String   @map("metric_id") @db.VarChar(120)
-  periodStart DateTime @map("period_start") @db.Timestamptz(6)
-  periodEnd   DateTime @map("period_end") @db.Timestamptz(6)
-  value       Decimal  @db.Decimal(24, 8)
-  currency    String?  @db.Char(3)
-  source      String   @db.VarChar(80)
-  dimensions  Json     @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  importBatchId String?  @map("import_batch_id") @db.Uuid
+  metricId      String   @map("metric_id") @db.VarChar(120)
+  periodStart   DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd     DateTime @map("period_end") @db.Timestamptz(6)
+  value         Decimal  @db.Decimal(24, 8)
+  currency      String?  @db.Char(3)
+  source        String   @db.VarChar(80)
+  dimensions    Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   importBatch MetricImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
@@ -400,4 +401,24 @@ model MetricImportRejection {
 
   @@index([batchId, rowNumber])
   @@map("metric_import_rejections")
+}
+
+model MetricGoal {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  sectorPackId      String    @map("sector_pack_id") @db.VarChar(80)
+  sectorPackVersion String    @map("sector_pack_version") @db.VarChar(32)
+  metricId          String    @map("metric_id") @db.VarChar(120)
+  currency          String?   @db.Char(3)
+  targetValue       Decimal   @map("target_value") @db.Decimal(24, 8)
+  validFrom         DateTime  @map("valid_from") @db.Timestamptz(6)
+  validTo           DateTime? @map("valid_to") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, validFrom, validTo])
+  @@index([workspaceId, metricId, validFrom])
+  @@map("metric_goals")
 }
