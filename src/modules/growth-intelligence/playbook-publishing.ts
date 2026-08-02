@@ -48,6 +48,27 @@ export function canTransitionPlaybookPublication(
   return false;
 }
 
+export function nextPatchVersion(version: string): string {
+  const parts = version.split(".").map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part) || part < 0)) {
+    throw new PlaybookPublicationValidationError("Rule version must be semantic versioning.");
+  }
+  return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+}
+
+export function buildRollbackRule(
+  publishedRule: DeclarativePlaybookRule,
+  canonicalRule: DeclarativePlaybookRule,
+): DeclarativePlaybookRule {
+  if (publishedRule.id !== canonicalRule.id) {
+    throw new PlaybookPublicationValidationError("Rollback target must preserve the published rule id.");
+  }
+  return {
+    ...canonicalRule,
+    version: nextPatchVersion(publishedRule.version),
+  };
+}
+
 export async function createPlaybookPublicationCandidate(
   dependencies: Readonly<{ database: DatabaseClient; authorizationStore: AuthorizationMembershipStore }>,
   input: Readonly<{
@@ -102,38 +123,68 @@ export async function createPlaybookPublicationCandidate(
     throw new PlaybookPublicationValidationError("Candidate rule version must be greater than the approved base version.");
   }
 
-  const id = randomUUID();
-  const structuredDiff = buildRuleDiff(baseRule, candidateRule);
-  const rows = await dependencies.database.$queryRaw<PlaybookPublicationCandidate[]>`
-    INSERT INTO growth_playbook_publication_candidates (
-      id, workspace_id, proposal_id, sector_pack_id, sector_pack_version,
-      rule_id, base_rule_version, candidate_rule_version, candidate_rule,
-      structured_diff, created_by_user_id
-    ) VALUES (
-      ${id}::uuid, ${tenant.workspaceId}::uuid, ${proposal.id}::uuid,
-      ${proposal.sectorPackId}, ${proposal.sectorPackVersion}, ${proposal.ruleId},
-      ${baseRule.version}, ${candidateRule.version}, ${JSON.stringify(candidateRule)}::jsonb,
-      ${JSON.stringify(structuredDiff)}::jsonb, ${input.userId}::uuid
-    )
-    RETURNING
-      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
-      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
-      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
-      candidate_rule_version AS "candidateRuleVersion", status,
-      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
-      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
-      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
-      created_at AS "createdAt", validated_at AS "validatedAt",
-      published_at AS "publishedAt", rejected_at AS "rejectedAt"
-  `;
-  const candidate = rows[0];
-  if (!candidate) throw new PlaybookPublicationValidationError("Unable to create publication candidate.");
-
-  await audit(dependencies.database, tenant, input.userId, candidate.id, "growth.playbook_candidate.created", {
+  return insertCandidate(dependencies.database, {
+    tenant,
     proposalId: proposal.id,
-    ruleId: candidate.ruleId,
-    baseRuleVersion: candidate.baseRuleVersion,
-    candidateRuleVersion: candidate.candidateRuleVersion,
+    sectorPackId: proposal.sectorPackId,
+    sectorPackVersion: proposal.sectorPackVersion,
+    baseRule,
+    candidateRule,
+    userId: input.userId,
+    auditAction: "growth.playbook_candidate.created",
+  });
+}
+
+export async function createPlaybookRollbackCandidate(
+  dependencies: Readonly<{ database: DatabaseClient; authorizationStore: AuthorizationMembershipStore }>,
+  input: Readonly<{
+    userId: string;
+    tenant: TenantContext;
+    publishedCandidateId: string;
+  }>,
+): Promise<PlaybookPublicationCandidate> {
+  const tenant = requireWorkspace(input.tenant);
+  await authorize(dependencies.authorizationStore, {
+    userId: input.userId,
+    tenant,
+    permission: GROWTH_INTELLIGENCE_PERMISSIONS.publishPlaybooks,
+  });
+
+  const published = await findCandidate(dependencies.database, tenant.workspaceId, input.publishedCandidateId);
+  if (!published || published.status !== "PUBLISHED") {
+    throw new PlaybookPublicationNotFoundError("Published playbook version was not found in this workspace.");
+  }
+
+  const canonical = await loadDeclarativePlaybook({
+    sectorPackId: published.sectorPackId,
+    sectorPackVersion: published.sectorPackVersion,
+  });
+  if (!canonical) throw new PlaybookPublicationValidationError("Canonical playbook is missing.");
+  const canonicalRule = canonical.rules.find((rule) => rule.id === published.ruleId);
+  if (!canonicalRule) throw new PlaybookPublicationValidationError("Canonical rollback target is missing.");
+
+  const rollbackRule = validateCandidateRule(
+    published.sectorPackId,
+    published.sectorPackVersion,
+    buildRollbackRule(published.candidateRule, canonicalRule),
+  );
+
+  const candidate = await insertCandidate(dependencies.database, {
+    tenant,
+    proposalId: published.proposalId,
+    sectorPackId: published.sectorPackId,
+    sectorPackVersion: published.sectorPackVersion,
+    baseRule: published.candidateRule,
+    candidateRule: rollbackRule,
+    userId: input.userId,
+    auditAction: "growth.playbook_rollback_candidate.created",
+  });
+
+  await audit(dependencies.database, tenant, input.userId, candidate.id, "growth.playbook_rollback.requested", {
+    sourceCandidateId: published.id,
+    ruleId: published.ruleId,
+    fromVersion: published.candidateRuleVersion,
+    rollbackCandidateVersion: candidate.candidateRuleVersion,
   });
   return candidate;
 }
@@ -177,16 +228,7 @@ export async function transitionPlaybookPublicationCandidate(
       rejected_by_user_id = CASE WHEN ${input.status} = 'REJECTED' THEN ${input.userId}::uuid ELSE rejected_by_user_id END,
       rejected_at = CASE WHEN ${input.status} = 'REJECTED' THEN CURRENT_TIMESTAMP ELSE rejected_at END
     WHERE id = ${input.candidateId}::uuid AND workspace_id = ${tenant.workspaceId}::uuid
-    RETURNING
-      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
-      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
-      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
-      candidate_rule_version AS "candidateRuleVersion", status,
-      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
-      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
-      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
-      created_at AS "createdAt", validated_at AS "validatedAt",
-      published_at AS "publishedAt", rejected_at AS "rejectedAt"
+    RETURNING ${candidateColumns()}
   `;
   const updated = rows[0];
   if (!updated) throw new PlaybookPublicationNotFoundError("Publication candidate disappeared during transition.");
@@ -205,36 +247,59 @@ export async function listPlaybookPublicationCandidates(
   workspaceId: string,
 ): Promise<PlaybookPublicationCandidate[]> {
   return database.$queryRaw<PlaybookPublicationCandidate[]>`
-    SELECT
-      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
-      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
-      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
-      candidate_rule_version AS "candidateRuleVersion", status,
-      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
-      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
-      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
-      created_at AS "createdAt", validated_at AS "validatedAt",
-      published_at AS "publishedAt", rejected_at AS "rejectedAt"
+    SELECT ${candidateColumns()}
     FROM growth_playbook_publication_candidates
     WHERE workspace_id = ${workspaceId}::uuid
     ORDER BY
+      rule_id ASC,
       CASE status WHEN 'VALIDATED' THEN 1 WHEN 'DRAFT' THEN 2 WHEN 'PUBLISHED' THEN 3 ELSE 4 END,
-      created_at DESC
+      COALESCE(published_at, validated_at, created_at) DESC
   `;
+}
+
+async function insertCandidate(
+  database: DatabaseClient,
+  input: Readonly<{
+    tenant: TenantContext & { clientOrganizationId: string; workspaceId: string };
+    proposalId: string;
+    sectorPackId: string;
+    sectorPackVersion: string;
+    baseRule: DeclarativePlaybookRule;
+    candidateRule: DeclarativePlaybookRule;
+    userId: string;
+    auditAction: string;
+  }>,
+): Promise<PlaybookPublicationCandidate> {
+  const id = randomUUID();
+  const structuredDiff = buildRuleDiff(input.baseRule, input.candidateRule);
+  const rows = await database.$queryRaw<PlaybookPublicationCandidate[]>`
+    INSERT INTO growth_playbook_publication_candidates (
+      id, workspace_id, proposal_id, sector_pack_id, sector_pack_version,
+      rule_id, base_rule_version, candidate_rule_version, candidate_rule,
+      structured_diff, created_by_user_id
+    ) VALUES (
+      ${id}::uuid, ${input.tenant.workspaceId}::uuid, ${input.proposalId}::uuid,
+      ${input.sectorPackId}, ${input.sectorPackVersion}, ${input.candidateRule.id},
+      ${input.baseRule.version}, ${input.candidateRule.version}, ${JSON.stringify(input.candidateRule)}::jsonb,
+      ${JSON.stringify(structuredDiff)}::jsonb, ${input.userId}::uuid
+    )
+    RETURNING ${candidateColumns()}
+  `;
+  const candidate = rows[0];
+  if (!candidate) throw new PlaybookPublicationValidationError("Unable to create publication candidate.");
+
+  await audit(database, input.tenant, input.userId, candidate.id, input.auditAction, {
+    proposalId: input.proposalId,
+    ruleId: candidate.ruleId,
+    baseRuleVersion: candidate.baseRuleVersion,
+    candidateRuleVersion: candidate.candidateRuleVersion,
+  });
+  return candidate;
 }
 
 async function findCandidate(database: DatabaseClient, workspaceId: string, candidateId: string) {
   const rows = await database.$queryRaw<PlaybookPublicationCandidate[]>`
-    SELECT
-      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
-      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
-      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
-      candidate_rule_version AS "candidateRuleVersion", status,
-      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
-      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
-      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
-      created_at AS "createdAt", validated_at AS "validatedAt",
-      published_at AS "publishedAt", rejected_at AS "rejectedAt"
+    SELECT ${candidateColumns()}
     FROM growth_playbook_publication_candidates
     WHERE id = ${candidateId}::uuid AND workspace_id = ${workspaceId}::uuid
     LIMIT 1
@@ -278,6 +343,20 @@ function compareSemver(left: string, right: string): number {
     if (delta !== 0) return delta;
   }
   return 0;
+}
+
+function candidateColumns(): string {
+  return `
+    id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
+    sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
+    rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
+    candidate_rule_version AS "candidateRuleVersion", status,
+    candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
+    created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
+    published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
+    created_at AS "createdAt", validated_at AS "validatedAt",
+    published_at AS "publishedAt", rejected_at AS "rejectedAt"
+  `;
 }
 
 async function audit(
