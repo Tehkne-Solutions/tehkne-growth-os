@@ -1,0 +1,4 @@
+metric_id,period_start,period_end,value,source,currency
+leads,2026-08-01,2026-08-01,42,csv,
+cpl,2026-08-01,2026-08-01,18.75,csv,BRL
+conversion_rate,2026-08-01,2026-08-01,4.2,csv,
