@@ -3,7 +3,7 @@ CREATE TABLE growth_action_outcomes (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   action_item_id UUID NOT NULL REFERENCES growth_action_items(id) ON DELETE CASCADE,
   metric_id TEXT NOT NULL,
-  currency TEXT,
+  currency TEXT NOT NULL DEFAULT '',
   baseline_from TIMESTAMPTZ NOT NULL,
   baseline_to TIMESTAMPTZ NOT NULL,
   evaluation_from TIMESTAMPTZ NOT NULL,
