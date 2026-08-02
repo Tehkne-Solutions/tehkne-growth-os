@@ -5,8 +5,12 @@ import { loadSectorPackManifest } from "@/modules/sector-packs/load-manifest";
 import type { TenantContext } from "@/modules/tenancy";
 import type { DatabaseClient } from "@/shared/db/client";
 
+import { deriveDecisionSignals } from "./decision-signals";
 import { enrichCommandCenterIntelligence, type InterpretedCommandCenterIntelligence } from "./enrich-command-center";
 import { loadActiveMetricGoals } from "./goal-repository";
+import { loadDeclarativePlaybook } from "./load-playbook";
+import { deriveMomentumDecisionSignals, mergeDecisionSignals } from "./momentum-signals";
+import { derivePlaybookRecommendations, type PlaybookRecommendation } from "./playbook-engine";
 import {
   buildOlderEquivalentPeriods,
   deriveMetricTimeSeries,
@@ -16,6 +20,7 @@ import {
 export type AuthorizedInterpretedCommandCenterIntelligence =
   InterpretedCommandCenterIntelligence & {
     timeSeries: MetricTimeSeries[];
+    recommendations: PlaybookRecommendation[];
   };
 
 export async function loadAuthorizedInterpretedCommandCenterIntelligence(
@@ -69,10 +74,11 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
         goals: [],
       }),
       timeSeries: deriveMetricTimeSeries({ snapshots, directions: new Map() }),
+      recommendations: [],
     };
   }
 
-  const [sectorPack, goals] = await Promise.all([
+  const [sectorPack, goals, playbook] = await Promise.all([
     loadSectorPackManifest({
       id: committedPack.sectorPackId,
       version: committedPack.sectorPackVersion,
@@ -83,11 +89,23 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
       sectorPackVersion: committedPack.sectorPackVersion,
       at: input.to,
     }),
+    loadDeclarativePlaybook({
+      sectorPackId: committedPack.sectorPackId,
+      sectorPackVersion: committedPack.sectorPackVersion,
+    }),
   ]);
   const directions = new Map(sectorPack.metrics.map((metric) => [metric.id, metric.direction]));
+  const interpreted = enrichCommandCenterIntelligence({ intelligence, sectorPack, goals });
+  const timeSeries = deriveMetricTimeSeries({ snapshots, directions });
+  const primarySignals = deriveDecisionSignals(interpreted.interpretedMetrics);
+  const momentumSignals = deriveMomentumDecisionSignals(timeSeries);
+  const signals = mergeDecisionSignals(primarySignals, momentumSignals);
 
   return {
-    ...enrichCommandCenterIntelligence({ intelligence, sectorPack, goals }),
-    timeSeries: deriveMetricTimeSeries({ snapshots, directions }),
+    ...interpreted,
+    timeSeries,
+    recommendations: playbook
+      ? derivePlaybookRecommendations({ playbook, signals, timeSeries })
+      : [],
   };
 }

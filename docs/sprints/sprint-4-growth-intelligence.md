@@ -94,7 +94,7 @@ Status: implementado e integrado à `main`.
 
 ## INT-14 — Momentum UI & Sparklines
 
-Status: implementado neste incremento.
+Status: implementado e integrado à `main`.
 
 - cada KPI recebe sparkline SVG server-side com as seis janelas equivalentes;
 - tendência, momentum e performance momentum aparecem no próprio card;
@@ -105,15 +105,30 @@ Status: implementado neste incremento.
 - sinais de meta continuam com prioridade superior aos sinais de momentum;
 - nenhuma reversão é classificada automaticamente como boa ou ruim.
 
+## INT-15 — Declarative Playbooks
+
+Status: motor e packs piloto implementados neste incremento.
+
+- playbooks vivem junto aos Sector Packs em JSON versionado e validado;
+- regras podem combinar métrica, severidade, momentum e performance momentum;
+- somente regras `active` podem produzir ações sugeridas;
+- cada recomendação carrega `ruleId`, versão, ação, prioridade, rationale, checklist e evidências;
+- evidências registram sinal, severidade, regra e trajetória que dispararam a recomendação;
+- o loader exige correspondência exata entre playbook e Sector Pack comprometido;
+- Education, Growth Services e Creative Services possuem playbooks piloto;
+- o loader autorizado do Command Center deriva recomendações somente após RBAC e usando o workspace já autorizado;
+- recomendações não executam alterações externas e não controlam campanha ou orçamento automaticamente.
+
 ## Próximos incrementos
 
-- playbooks declarativos e recomendações explicáveis;
-- persistência opcional de sinais para histórico operacional;
+- apresentação dos playbooks e evidências no Command Center;
+- persistência opcional de sinais/recomendações para histórico operacional;
 - regras de severidade configuráveis por Sector Pack;
+- workflow humano de aceitar, rejeitar e concluir ações sugeridas;
 - visão executiva cross-workspace com RBAC próprio.
 
 ## Critério de saída
 
-Um usuário autorizado deve conseguir distinguir movimento, desempenho, meta e trajetória multi-período no mesmo Command Center, com sinais determinísticos, isolamento tenant-aware e sem inferência semântica não declarada.
+Um usuário autorizado deve conseguir distinguir movimento, desempenho, meta e trajetória multi-período e receber recomendações explicáveis vindas de regras versionadas do Sector Pack, sem mistura de tenant, execução automática ou inferência semântica não declarada.
 
 Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.

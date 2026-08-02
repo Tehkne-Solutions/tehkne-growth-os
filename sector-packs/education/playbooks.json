@@ -1,0 +1,75 @@
+{
+  "sectorPackId": "education",
+  "sectorPackVersion": "1.0.0",
+  "rules": [
+    {
+      "id": "cpl-critical-review",
+      "version": "1.0.0",
+      "name": "Revisar aquisição quando CPL degrada",
+      "status": "active",
+      "priority": 100,
+      "when": {
+        "metricId": "cpl",
+        "severity": "critical",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-acquisition-efficiency",
+        "title": "Revisar eficiência de aquisição",
+        "rationale": "CPL em piora e fora da meta pede diagnóstico do caminho anúncio → landing page → lead antes de aumentar investimento.",
+        "checklist": [
+          "Comparar CPL por campanha, conjunto e criativo",
+          "Verificar queda de CTR e aumento de CPC",
+          "Revisar taxa de conversão da landing page",
+          "Checar qualidade e distribuição dos leads por origem"
+        ]
+      }
+    },
+    {
+      "id": "enrollment-momentum-review",
+      "version": "1.0.0",
+      "name": "Investigar desaceleração de matrículas",
+      "status": "active",
+      "priority": 85,
+      "when": {
+        "metricId": "enrollments",
+        "severity": "warning",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-enrollment-funnel",
+        "title": "Revisar o funil de matrícula",
+        "rationale": "A deterioração de matrículas deve ser localizada entre lead, inscrição e matrícula antes de alterar mídia ou oferta.",
+        "checklist": [
+          "Comparar conversão lead → inscrição",
+          "Comparar conversão inscrição → matrícula",
+          "Revisar tempo de resposta comercial",
+          "Identificar etapas com maior abandono"
+        ]
+      }
+    },
+    {
+      "id": "activation-reversal-review",
+      "version": "1.0.0",
+      "name": "Analisar reversão de ativação",
+      "status": "active",
+      "priority": 70,
+      "when": {
+        "metricId": "activation_rate",
+        "severity": "context",
+        "momentum": "reversal"
+      },
+      "action": {
+        "id": "inspect-activation-reversal",
+        "title": "Investigar a reversão na ativação",
+        "rationale": "Uma mudança de direção na ativação merece validação de coorte e operação antes de qualquer conclusão causal.",
+        "checklist": [
+          "Separar a taxa de ativação por coorte",
+          "Verificar mudanças recentes no onboarding",
+          "Comparar canais e perfis de alunos",
+          "Checar problemas operacionais no período"
+        ]
+      }
+    }
+  ]
+}
