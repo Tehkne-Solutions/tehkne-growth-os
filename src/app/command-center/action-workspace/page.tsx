@@ -12,6 +12,7 @@ import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/gr
 import { listGrowthActions, type GrowthActionItem } from "@/modules/growth-intelligence/action-workflow";
 import type { PlaybookRecommendation } from "@/modules/growth-intelligence/playbook-engine";
 import { summarizeEffectiveness, type EffectivenessSummary } from "@/modules/growth-intelligence/playbook-effectiveness";
+import { listPlaybookReviewProposals, type PlaybookReviewProposal } from "@/modules/growth-intelligence/playbook-review";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -44,6 +45,7 @@ type PageState =
       actions: readonly GrowthActionItem[];
       outcomes: readonly ActionEffectivenessRecord[];
       effectiveness: EffectivenessSummary;
+      reviewProposals: readonly PlaybookReviewProposal[];
       backQuery: string;
     };
 
@@ -84,9 +86,10 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       { database, authorizationStore: identityRepository },
       { userId: session.userId, tenant, from: context.from, to: context.to },
     );
-    const [actions, outcomes] = await Promise.all([
+    const [actions, outcomes, reviewProposals] = await Promise.all([
       listGrowthActions(database, context.tenant.workspaceId),
       listActionEffectiveness(database, context.tenant.workspaceId),
+      listPlaybookReviewProposals(database, context.tenant.workspaceId),
     ]);
 
     return {
@@ -96,6 +99,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       actions,
       outcomes,
       effectiveness: summarizeEffectiveness(outcomes),
+      reviewProposals,
       backQuery: toSearchParams(params),
     };
   } catch (error) {
@@ -127,6 +131,7 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
         initialActions={state.actions}
         initialOutcomes={state.outcomes}
         initialEffectiveness={state.effectiveness}
+        initialReviewProposals={state.reviewProposals}
       />
     </main>
   );

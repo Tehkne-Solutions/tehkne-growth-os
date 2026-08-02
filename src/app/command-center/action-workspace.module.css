@@ -48,6 +48,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
+  margin-top: 24px;
 }
 
 .columnTitle {
@@ -119,6 +120,49 @@
   padding-left: 20px;
 }
 
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.formGrid label {
+  display: grid;
+  gap: 6px;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.formGrid input,
+.formGrid textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d6dae1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #16181d;
+  font: inherit;
+}
+
+.formGrid textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+}
+
+.reviewItem {
+  padding: 14px;
+  border: 1px solid #eef0f3;
+  border-radius: 14px;
+  background: #fafbfc;
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -131,9 +175,11 @@
 }
 
 .status[data-status="IN_PROGRESS"] { background: #fff3cd; }
-.status[data-status="COMPLETED"] { background: #dff6e6; }
+.status[data-status="COMPLETED"],
+.status[data-status="APPROVED"] { background: #dff6e6; }
 .status[data-status="REJECTED"] { background: #fde3e3; }
-.status[data-status="ACCEPTED"] { background: #e7efff; }
+.status[data-status="ACCEPTED"],
+.status[data-status="SUBMITTED"] { background: #e7efff; }
 
 .primary,
 .secondary {
@@ -181,5 +227,7 @@
   .page { padding: 20px; }
   .header { align-items: flex-start; flex-direction: column; }
   .columns,
-  .explainabilityGrid { grid-template-columns: 1fr; }
+  .explainabilityGrid,
+  .formGrid { grid-template-columns: 1fr; }
+  .fullWidth { grid-column: auto; }
 }
