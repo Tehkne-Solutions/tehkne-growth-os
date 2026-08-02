@@ -3,6 +3,11 @@ import type { AuthorizationMembershipStore } from "@/modules/identity/applicatio
 import { parseTenantContext, type TenantContext } from "@/modules/tenancy";
 import type { DatabaseClient } from "@/shared/db/client";
 
+import {
+  compareCommandCenterSnapshots,
+  previousEquivalentPeriod,
+  type CommandCenterIntelligence,
+} from "./intelligence";
 import { COMMAND_CENTER_PERMISSIONS } from "./permissions";
 import {
   loadCommandCenterSnapshot,
@@ -28,18 +33,63 @@ export async function loadAuthorizedCommandCenterSnapshot(
     to: Date;
   }>,
 ): Promise<CommandCenterSnapshot> {
+  const workspaceId = await authorizeWorkspace(dependencies.authorizationStore, input);
+
+  return loadCommandCenterSnapshot(dependencies.database, {
+    workspaceId,
+    from: input.from,
+    to: input.to,
+  });
+}
+
+export async function loadAuthorizedCommandCenterIntelligence(
+  dependencies: Readonly<{
+    database: DatabaseClient;
+    authorizationStore: AuthorizationMembershipStore;
+  }>,
+  input: Readonly<{
+    userId: string;
+    tenant: TenantContext;
+    from: Date;
+    to: Date;
+  }>,
+): Promise<CommandCenterIntelligence> {
+  const workspaceId = await authorizeWorkspace(dependencies.authorizationStore, input);
+  const previous = previousEquivalentPeriod({ from: input.from, to: input.to });
+
+  const [currentSnapshot, previousSnapshot] = await Promise.all([
+    loadCommandCenterSnapshot(dependencies.database, {
+      workspaceId,
+      from: input.from,
+      to: input.to,
+    }),
+    loadCommandCenterSnapshot(dependencies.database, {
+      workspaceId,
+      from: previous.from,
+      to: previous.to,
+    }),
+  ]);
+
+  return compareCommandCenterSnapshots(currentSnapshot, previousSnapshot);
+}
+
+async function authorizeWorkspace(
+  authorizationStore: AuthorizationMembershipStore,
+  input: Readonly<{
+    userId: string;
+    tenant: TenantContext;
+    from: Date;
+    to: Date;
+  }>,
+): Promise<string> {
   const tenant = parseTenantContext(input.tenant);
   if (!tenant.workspaceId) throw new CommandCenterWorkspaceRequiredError();
 
-  await authorize(dependencies.authorizationStore, {
+  await authorize(authorizationStore, {
     userId: input.userId,
     tenant,
     permission: COMMAND_CENTER_PERMISSIONS.read,
   });
 
-  return loadCommandCenterSnapshot(dependencies.database, {
-    workspaceId: tenant.workspaceId,
-    from: input.from,
-    to: input.to,
-  });
+  return tenant.workspaceId;
 }
