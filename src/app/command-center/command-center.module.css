@@ -31,9 +31,18 @@
   box-shadow: 0 0 0 5px var(--accent-soft);
 }
 
-.context {
+.context,
+.contextLink {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.contextLink {
+  text-decoration: none;
+}
+
+.contextLink:hover {
+  color: var(--text);
 }
 
 .hero {
@@ -84,7 +93,8 @@
 
 .metricCard,
 .infoCard,
-.stateCard {
+.stateCard,
+.selectorCard {
   border: 1px solid var(--line);
   background: var(--surface);
   backdrop-filter: blur(16px);
@@ -157,6 +167,101 @@
   border-radius: 24px;
 }
 
+.selectorCard {
+  max-width: 780px;
+  margin: 7vh auto 0;
+  padding: 38px;
+  border-radius: 26px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.18);
+}
+
+.selectorTitle {
+  margin: 0;
+  font-size: clamp(2.4rem, 5vw, 4rem);
+  font-weight: 620;
+  letter-spacing: -0.055em;
+}
+
+.selectorCopy {
+  max-width: 620px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.selectorCopy code {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84em;
+}
+
+.selectorForm {
+  display: grid;
+  gap: 18px;
+  margin-top: 34px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.field select,
+.field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  color: var(--text);
+  background: rgba(6, 16, 14, 0.72);
+  font: inherit;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.field select:focus,
+.field input:focus {
+  border-color: rgba(101, 217, 173, 0.48);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.dateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.primaryButton {
+  min-height: 50px;
+  border: 0;
+  border-radius: 13px;
+  color: #07100f;
+  background: var(--accent);
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.primaryButton:hover {
+  filter: brightness(1.05);
+}
+
+.emptyBox {
+  margin-top: 30px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .code {
   display: inline-block;
   margin-top: 18px;
@@ -201,12 +306,14 @@
     flex-direction: column;
   }
 
-  .hero {
+  .hero,
+  .selectorCard {
     padding: 26px 22px;
     border-radius: 20px;
   }
 
-  .metrics {
+  .metrics,
+  .dateGrid {
     grid-template-columns: 1fr;
   }
 }
