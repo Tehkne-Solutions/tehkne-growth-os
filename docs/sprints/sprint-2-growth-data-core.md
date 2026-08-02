@@ -1,0 +1,56 @@
+# Sprint 2 — Growth Data Core
+
+## Objetivo
+
+Transformar a fundação segura do Tehkné Growth OS em um núcleo capaz de compreender dados de Growth de diferentes setores por contratos canônicos.
+
+## Entregas
+
+### GDC-01 — Sector Pack Registry
+
+Status: implementado no incremento atual.
+
+- manifestos declarativos e versionados;
+- contratos TypeScript;
+- validação estrutural;
+- resolução de pack ativo;
+- packs iniciais para Growth Services, Education e Creative Services.
+
+### GDC-02 — Funnels, Metrics & Events
+
+Status: implementado no incremento atual.
+
+- eventos tenant-aware;
+- observações de métricas;
+- validação de métrica/evento contra Sector Pack;
+- chave de deduplicação de evento;
+- agregação básica.
+
+### GDC-03 — CSV Import
+
+Status: fundação implementada.
+
+- linha canônica de observação de métrica;
+- normalização de período, valor, fonte e moeda;
+- rejeição de valores e períodos inválidos;
+- arquivo de exemplo.
+
+Próximo incremento: parser de arquivo completo, preview, relatório de rejeições, idempotência e persistência transacional.
+
+### GDC-04 — Persistence
+
+Status: próximo.
+
+Adicionar modelos Prisma para eventos, observações, import batches e rejeições, sempre escopados por workspace.
+
+### GDC-05 — Command Center
+
+Status: posterior ao GDC-04.
+
+Primeiro dashboard operacional usando somente dados canônicos persistidos.
+
+## Critério de saída da sprint
+
+Um workspace autorizado deve conseguir selecionar seu Sector Pack, importar métricas por CSV de forma idempotente, persistir eventos/observações auditáveis e visualizar os KPIs fundamentais no Command Center.
+
+Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.
