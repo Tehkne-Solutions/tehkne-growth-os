@@ -56,6 +56,8 @@ export async function POST(request: Request) {
     const session = await validateSession(repository, token, secret);
     const body = goalSchema.parse(await request.json());
     const tenant = parseTenantContext(body.tenant);
+    const optionalGoalInput =
+      body.currency === undefined ? {} : { currency: body.currency };
 
     const goal = await setMetricGoal(
       { database, authorizationStore: repository },
@@ -63,9 +65,9 @@ export async function POST(request: Request) {
         userId: session.userId,
         tenant,
         metricId: body.metricId,
-        currency: body.currency,
         targetValue: body.targetValue,
         validFrom: new Date(body.validFrom),
+        ...optionalGoalInput,
       },
     );
 
