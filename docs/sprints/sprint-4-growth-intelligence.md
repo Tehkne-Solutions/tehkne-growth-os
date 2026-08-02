@@ -27,63 +27,103 @@ Status: implementado e integrado à `main`.
 
 ## INT-03 — Comparative Command Center UI
 
-Status: primeira versão implementada e integrada à `main`.
+Status: implementado e integrado à `main`.
 
 - cada KPI mostra valor atual, valor anterior, delta e variação percentual;
 - eventos também recebem comparação contra baseline;
-- baseline usado é explicitado na interface;
-- denominador zero nunca gera percentual infinito: o estado é apresentado como novo baseline;
+- denominador zero nunca gera percentual infinito;
 - nenhuma meta, previsão ou recomendação é inventada.
 
 ## INT-04 — Semantic Interpretation
 
-Status: implementado neste incremento.
+Status: implementado e integrado à `main`.
 
-- o `direction` do Sector Pack é a fonte canônica para interpretação;
-- `up` e `down` descrevem movimento, enquanto `improved` e `worsened` descrevem resultado;
-- métricas `contextual` nunca recebem julgamento positivo/negativo automático;
-- ausência de baseline e métrica ausente no pack permanecem estados explícitos;
-- o manifest versionado é carregado e validado diretamente de `sector-packs/<id>/manifest.json`.
+- `direction` do Sector Pack é a fonte canônica para interpretação;
+- movimento e resultado permanecem conceitos separados;
+- métricas `contextual` nunca recebem julgamento automático;
+- manifests reais suportam IDs canônicos de métricas, eventos e stages em `snake_case`.
 
 ## INT-05 — Effective-Dated Metric Goals
 
-Status: fundação persistente implementada neste incremento.
+Status: implementado e integrado à `main`.
 
-- metas são escopadas por workspace, Sector Pack, versão, métrica e moeda;
-- `valid_from` e `valid_to` permitem histórico e troca de meta sem destruir contexto anterior;
-- a meta ativa é resolvida na data final do período analisado;
-- `target attainment` respeita a direção da métrica;
-- target zero não gera porcentagem artificial;
-- métricas contextuais podem ter target armazenado, mas não recebem julgamento automático de cumprimento;
-- somente o último Sector Pack `COMMITTED` do workspace pode governar a interpretação.
+- metas escopadas por workspace, Sector Pack, versão, métrica e moeda;
+- histórico por `valid_from` / `valid_to`;
+- target attainment respeita a direção semântica;
+- target zero não gera porcentagem artificial.
 
 ## INT-06 — Interpreted Command Center
 
-Status: camada de domínio implementada; UI é o próximo incremento.
+Status: implementado e integrado à `main`.
 
 Pipeline:
 
 `comparação numérica → pack versionado → direção semântica → meta vigente → outcome/attainment`
 
-A camada enriquecida produz, para cada KPI:
+## INT-07 — Prisma MetricGoal
 
-- movimento (`up`, `down`, `flat`, `no-baseline`);
-- resultado (`improved`, `worsened`, `neutral`, `context-required`, `no-baseline`);
-- direção declarada pelo pack;
-- meta vigente, quando houver;
-- gap absoluto;
-- percentual de atingimento quando matematicamente e semanticamente válido.
+Status: implementado e integrado à `main`.
+
+- `MetricGoal` espelhado no schema Prisma;
+- relação explícita com `Workspace`;
+- leituras de meta migradas de SQL dedicado para Prisma.
+
+## INT-08 — Goal Management Permission
+
+Status: implementado e integrado à `main`.
+
+- permissão `growth.goals.manage` persistida no catálogo;
+- workspace bruto nunca é tratado como autorização.
+
+## INT-09 — Audited Goal Mutation
+
+Status: implementado e integrado à `main`.
+
+- `POST /api/growth/goals` protegido por same-origin, sessão, tenant e RBAC;
+- métrica validada contra o último Sector Pack `COMMITTED`;
+- meta anterior é fechada antes de uma nova entrar em vigor;
+- meta e `AuditEvent` são persistidos na mesma transação.
+
+## INT-10 — Goal Mutation Coverage
+
+Status: implementado e integrado à `main`.
+
+- testes de autorização antecipada;
+- métrica inválida rejeitada;
+- criação transacional de meta + auditoria;
+- manifest real do pack Education validado pelo gate.
+
+## INT-11 — Goals UI
+
+Status: implementado neste incremento.
+
+- cada KPI mostra Meta, Gap e Atingimento;
+- outcome semântico é apresentado como Melhorou, Piorou, Estável ou Requer contexto;
+- editor contextual permite definir ou substituir a meta sem JSON/API manual;
+- o editor reutiliza a API segura existente e nunca recebe liberdade para escolher Sector Pack arbitrário.
+
+## INT-12 — Decision Signals
+
+Status: implementado neste incremento.
+
+- sinais derivados exclusivamente de `InterpretedCommandCenterMetric`;
+- prioridade determinística e explicável;
+- `worsened + not-met` recebe prioridade crítica;
+- `not-met` e `worsened` isolados recebem warning;
+- `improved + met` gera sinal positivo;
+- métricas contextuais continuam explicitamente sem julgamento;
+- nenhum texto de sinal depende de LLM ou recomendação inventada.
 
 ## Próximos incrementos
 
-- expor a interpretação e as metas na UI do Command Center;
-- endpoint seguro para criação/edição de metas com permissão própria;
-- modelar `MetricGoal` também no schema Prisma para eliminar acesso SQL dedicado;
-- séries temporais e tendências multi-período;
-- sinais operacionais e prioridades explicáveis.
+- séries temporais multi-período;
+- persistência opcional de sinais para histórico operacional;
+- regras de severidade configuráveis por Sector Pack;
+- recomendações explicáveis baseadas em playbooks declarativos;
+- visão executiva cross-workspace com RBAC próprio.
 
 ## Critério de saída
 
-Um usuário autorizado deve conseguir distinguir movimento de desempenho, comparar o período selecionado com um baseline equivalente e avaliar metas reais do workspace sem mistura de tenant, sem porcentagens inválidas e sem inferência semântica não declarada.
+Um usuário autorizado deve conseguir distinguir movimento de desempenho, comparar o período selecionado com baseline equivalente, avaliar e administrar metas reais do workspace e identificar prioridades derivadas de regras explícitas, sem mistura de tenant, porcentagens inválidas ou inferência semântica não declarada.
 
 Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.
