@@ -115,7 +115,16 @@ export async function createPlaybookPublicationCandidate(
       ${baseRule.version}, ${candidateRule.version}, ${JSON.stringify(candidateRule)}::jsonb,
       ${JSON.stringify(structuredDiff)}::jsonb, ${input.userId}::uuid
     )
-    RETURNING ${candidateColumns()}
+    RETURNING
+      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
+      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
+      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
+      candidate_rule_version AS "candidateRuleVersion", status,
+      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
+      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
+      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
+      created_at AS "createdAt", validated_at AS "validatedAt",
+      published_at AS "publishedAt", rejected_at AS "rejectedAt"
   `;
   const candidate = rows[0];
   if (!candidate) throw new PlaybookPublicationValidationError("Unable to create publication candidate.");
@@ -168,7 +177,16 @@ export async function transitionPlaybookPublicationCandidate(
       rejected_by_user_id = CASE WHEN ${input.status} = 'REJECTED' THEN ${input.userId}::uuid ELSE rejected_by_user_id END,
       rejected_at = CASE WHEN ${input.status} = 'REJECTED' THEN CURRENT_TIMESTAMP ELSE rejected_at END
     WHERE id = ${input.candidateId}::uuid AND workspace_id = ${tenant.workspaceId}::uuid
-    RETURNING ${candidateColumns()}
+    RETURNING
+      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
+      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
+      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
+      candidate_rule_version AS "candidateRuleVersion", status,
+      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
+      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
+      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
+      created_at AS "createdAt", validated_at AS "validatedAt",
+      published_at AS "publishedAt", rejected_at AS "rejectedAt"
   `;
   const updated = rows[0];
   if (!updated) throw new PlaybookPublicationNotFoundError("Publication candidate disappeared during transition.");
@@ -187,7 +205,16 @@ export async function listPlaybookPublicationCandidates(
   workspaceId: string,
 ): Promise<PlaybookPublicationCandidate[]> {
   return database.$queryRaw<PlaybookPublicationCandidate[]>`
-    SELECT ${candidateColumns()}
+    SELECT
+      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
+      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
+      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
+      candidate_rule_version AS "candidateRuleVersion", status,
+      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
+      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
+      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
+      created_at AS "createdAt", validated_at AS "validatedAt",
+      published_at AS "publishedAt", rejected_at AS "rejectedAt"
     FROM growth_playbook_publication_candidates
     WHERE workspace_id = ${workspaceId}::uuid
     ORDER BY
@@ -198,7 +225,16 @@ export async function listPlaybookPublicationCandidates(
 
 async function findCandidate(database: DatabaseClient, workspaceId: string, candidateId: string) {
   const rows = await database.$queryRaw<PlaybookPublicationCandidate[]>`
-    SELECT ${candidateColumns()}
+    SELECT
+      id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
+      sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
+      rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
+      candidate_rule_version AS "candidateRuleVersion", status,
+      candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
+      created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
+      published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
+      created_at AS "createdAt", validated_at AS "validatedAt",
+      published_at AS "publishedAt", rejected_at AS "rejectedAt"
     FROM growth_playbook_publication_candidates
     WHERE id = ${candidateId}::uuid AND workspace_id = ${workspaceId}::uuid
     LIMIT 1
@@ -242,20 +278,6 @@ function compareSemver(left: string, right: string): number {
     if (delta !== 0) return delta;
   }
   return 0;
-}
-
-function candidateColumns(): string {
-  return `
-    id, workspace_id AS "workspaceId", proposal_id AS "proposalId",
-    sector_pack_id AS "sectorPackId", sector_pack_version AS "sectorPackVersion",
-    rule_id AS "ruleId", base_rule_version AS "baseRuleVersion",
-    candidate_rule_version AS "candidateRuleVersion", status,
-    candidate_rule AS "candidateRule", structured_diff AS "structuredDiff",
-    created_by_user_id AS "createdByUserId", validated_by_user_id AS "validatedByUserId",
-    published_by_user_id AS "publishedByUserId", rejected_by_user_id AS "rejectedByUserId",
-    created_at AS "createdAt", validated_at AS "validatedAt",
-    published_at AS "publishedAt", rejected_at AS "rejectedAt"
-  `;
 }
 
 async function audit(
