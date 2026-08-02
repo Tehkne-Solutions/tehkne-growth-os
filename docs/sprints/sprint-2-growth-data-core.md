@@ -28,22 +28,21 @@ Status: implementado.
 
 ### GDC-03 — CSV Import
 
-Status: parser e preview implementados.
+Status: contrato funcional implementado; falta persistência transacional.
 
 - linha canônica de observação de métrica;
 - normalização de período, valor, fonte e moeda;
 - parser de arquivo CSV com campos entre aspas;
 - preview de linhas aceitas;
 - relatório de rejeições por linha;
+- fingerprint SHA-256 escopado por workspace + pack + versão para idempotência;
 - arquivo de exemplo.
-
-Próximo incremento: idempotência e persistência transacional do batch.
 
 ### GDC-04 — Persistence
 
 Status: próximo.
 
-Adicionar modelos Prisma para eventos, observações, import batches e rejeições, sempre escopados por workspace.
+Adicionar modelos Prisma para eventos, observações, import batches e rejeições, sempre escopados por workspace. A persistência deve usar o fingerprint de GDC-03 como barreira de duplicação.
 
 ### GDC-05 — Command Center
 
