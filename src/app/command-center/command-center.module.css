@@ -94,7 +94,8 @@
 .metricCard,
 .infoCard,
 .stateCard,
-.selectorCard {
+.selectorCard,
+.signalCard {
   border: 1px solid var(--line);
   background: var(--surface);
   backdrop-filter: blur(16px);
@@ -116,10 +117,170 @@
 }
 
 .metricValue {
-  margin: 42px 0 0;
+  margin: 28px 0 0;
   font-size: clamp(2rem, 4vw, 3.2rem);
   font-weight: 650;
   letter-spacing: -0.05em;
+}
+
+.metricMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.metricMeta div {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(5, 14, 13, 0.28);
+}
+
+.metricMeta span,
+.signalMeta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.metricMeta strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.88rem;
+}
+
+.outcome {
+  display: inline-flex;
+  margin-top: 14px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.signalSection {
+  padding: 2px 0 18px;
+}
+
+.signalHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.signalHeader h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 2.3rem);
+  letter-spacing: -0.035em;
+}
+
+.signalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.signalCard {
+  min-height: 150px;
+  padding: 20px;
+  border-radius: 18px;
+}
+
+.signalCard[data-severity="critical"] {
+  border-color: rgba(255, 112, 112, 0.38);
+}
+
+.signalCard[data-severity="warning"] {
+  border-color: rgba(255, 197, 97, 0.34);
+}
+
+.signalCard[data-severity="positive"] {
+  border-color: rgba(101, 217, 173, 0.42);
+}
+
+.signalCard h3 {
+  margin: 10px 0 8px;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.signalCard p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 0.84rem;
+}
+
+.goalEditor {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.goalField {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.goalField input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: rgba(6, 16, 14, 0.72);
+  font: inherit;
+  font-size: 0.78rem;
+  text-transform: none;
+}
+
+.goalButton {
+  align-self: end;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #07100f;
+  font-size: 0.74rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.goalButton:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.goalError,
+.goalSuccess {
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+}
+
+.goalError {
+  color: #ff9292;
+}
+
+.goalSuccess {
+  color: var(--accent);
 }
 
 .secondaryGrid {
@@ -289,7 +450,8 @@
     grid-template-columns: 1fr;
   }
 
-  .metrics {
+  .metrics,
+  .signalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -301,7 +463,8 @@
   }
 
   .topbar,
-  .footer {
+  .footer,
+  .signalHeader {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -313,7 +476,10 @@
   }
 
   .metrics,
-  .dateGrid {
+  .dateGrid,
+  .signalGrid,
+  .metricMeta,
+  .goalEditor {
     grid-template-columns: 1fr;
   }
 }
