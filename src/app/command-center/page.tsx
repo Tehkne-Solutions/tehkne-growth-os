@@ -38,8 +38,8 @@ type PageState =
       kind: "workspace-selection";
       operatorOrganizationId: string;
       workspaces: CommandCenterWorkspaceOption[];
-      from?: string;
-      to?: string;
+      from: string | undefined;
+      to: string | undefined;
     }
   | {
       kind: "snapshot";
@@ -279,8 +279,8 @@ function WorkspaceSelectionPage({
 }: Readonly<{
   operatorOrganizationId: string;
   workspaces: readonly CommandCenterWorkspaceOption[];
-  from?: string;
-  to?: string;
+  from: string | undefined;
+  to: string | undefined;
 }>) {
   const defaults = defaultPeriod(from, to);
 
