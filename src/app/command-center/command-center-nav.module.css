@@ -1,0 +1,25 @@
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid #e6e9ef;
+  background: rgba(255, 255, 255, .94);
+  backdrop-filter: blur(16px);
+}
+
+.link {
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.link[data-active="true"] {
+  background: #111827;
+  color: #fff;
+}
