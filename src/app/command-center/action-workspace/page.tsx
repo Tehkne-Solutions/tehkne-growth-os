@@ -10,15 +10,23 @@ import { getSessionCookieName } from "@/modules/identity/http/security";
 import { listActionEffectiveness, type ActionEffectivenessRecord } from "@/modules/growth-intelligence/action-effectiveness";
 import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/authorized-intelligence";
 import { listGrowthActions, type GrowthActionItem } from "@/modules/growth-intelligence/action-workflow";
+import { loadDeclarativePlaybook } from "@/modules/growth-intelligence/load-playbook";
 import type { PlaybookRecommendation } from "@/modules/growth-intelligence/playbook-engine";
 import { summarizeEffectiveness, type EffectivenessSummary } from "@/modules/growth-intelligence/playbook-effectiveness";
+import {
+  listPlaybookPublicationCandidates,
+  nextPatchVersion,
+  type PlaybookPublicationCandidate,
+} from "@/modules/growth-intelligence/playbook-publishing";
 import { listPlaybookReviewProposals, type PlaybookReviewProposal } from "@/modules/growth-intelligence/playbook-review";
+import type { DeclarativePlaybookRule } from "@/modules/growth-intelligence/playbooks";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
 
 import { ActionWorkspace } from "../action-workspace";
 import styles from "../action-workspace.module.css";
+import { PublishingWorkspace } from "../publishing-workspace";
 
 type SearchValue = string | string[] | undefined;
 type PageProps = { searchParams: Promise<Record<string, SearchValue>> };
@@ -31,6 +39,16 @@ type WorkspaceContext = {
   };
   from: Date;
   to: Date;
+};
+
+type ApprovedProposalDraft = {
+  proposalId: string;
+  ruleId: string;
+  ruleVersion: string;
+  title: string;
+  rationale: string;
+  proposedChange: Record<string, unknown>;
+  candidateRule: DeclarativePlaybookRule;
 };
 
 type PageState =
@@ -46,6 +64,8 @@ type PageState =
       outcomes: readonly ActionEffectivenessRecord[];
       effectiveness: EffectivenessSummary;
       reviewProposals: readonly PlaybookReviewProposal[];
+      publicationCandidates: readonly PlaybookPublicationCandidate[];
+      approvedProposalDrafts: readonly ApprovedProposalDraft[];
       backQuery: string;
     };
 
@@ -86,11 +106,13 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       { database, authorizationStore: identityRepository },
       { userId: session.userId, tenant, from: context.from, to: context.to },
     );
-    const [actions, outcomes, reviewProposals] = await Promise.all([
+    const [actions, outcomes, reviewProposals, publicationCandidates] = await Promise.all([
       listGrowthActions(database, context.tenant.workspaceId),
       listActionEffectiveness(database, context.tenant.workspaceId),
       listPlaybookReviewProposals(database, context.tenant.workspaceId),
+      listPlaybookPublicationCandidates(database, context.tenant.workspaceId),
     ]);
+    const approvedProposalDrafts = await buildApprovedProposalDrafts(reviewProposals);
 
     return {
       kind: "ready",
@@ -100,6 +122,8 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       outcomes,
       effectiveness: summarizeEffectiveness(outcomes),
       reviewProposals,
+      publicationCandidates,
+      approvedProposalDrafts,
       backQuery: toSearchParams(params),
     };
   } catch (error) {
@@ -123,6 +147,12 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
         </div>
       </header>
 
+      <PublishingWorkspace
+        tenant={state.context.tenant}
+        initialCandidates={state.publicationCandidates.map(serializePublicationCandidate)}
+        approvedProposalDrafts={state.approvedProposalDrafts}
+      />
+
       <ActionWorkspace
         tenant={state.context.tenant}
         from={state.context.from.toISOString()}
@@ -135,6 +165,59 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
       />
     </main>
   );
+}
+
+async function buildApprovedProposalDrafts(
+  proposals: readonly PlaybookReviewProposal[],
+): Promise<ApprovedProposalDraft[]> {
+  const approved = proposals.filter((proposal) => proposal.status === "APPROVED");
+  const playbookCache = new Map<string, Awaited<ReturnType<typeof loadDeclarativePlaybook>>>();
+  const drafts: ApprovedProposalDraft[] = [];
+
+  for (const proposal of approved) {
+    const key = `${proposal.sectorPackId}@${proposal.sectorPackVersion}`;
+    let playbook = playbookCache.get(key);
+    if (playbook === undefined) {
+      playbook = await loadDeclarativePlaybook({
+        sectorPackId: proposal.sectorPackId,
+        sectorPackVersion: proposal.sectorPackVersion,
+      });
+      playbookCache.set(key, playbook);
+    }
+    const rule = playbook?.rules.find((candidate) => candidate.id === proposal.ruleId);
+    if (!rule || rule.version !== proposal.ruleVersion) continue;
+
+    drafts.push({
+      proposalId: proposal.id,
+      ruleId: proposal.ruleId,
+      ruleVersion: proposal.ruleVersion,
+      title: proposal.title,
+      rationale: proposal.rationale,
+      proposedChange: proposal.proposedChange,
+      candidateRule: { ...rule, version: nextPatchVersion(rule.version) },
+    });
+  }
+
+  return drafts;
+}
+
+function serializePublicationCandidate(candidate: PlaybookPublicationCandidate) {
+  return {
+    id: candidate.id,
+    proposalId: candidate.proposalId,
+    ruleId: candidate.ruleId,
+    baseRuleVersion: candidate.baseRuleVersion,
+    candidateRuleVersion: candidate.candidateRuleVersion,
+    status: candidate.status,
+    candidateRule: candidate.candidateRule,
+    structuredDiff: candidate.structuredDiff,
+    createdByUserId: candidate.createdByUserId,
+    validatedByUserId: candidate.validatedByUserId,
+    publishedByUserId: candidate.publishedByUserId,
+    createdAt: candidate.createdAt.toISOString(),
+    validatedAt: candidate.validatedAt?.toISOString() ?? null,
+    publishedAt: candidate.publishedAt?.toISOString() ?? null,
+  };
 }
 
 function StatePage({ title, detail }: Readonly<{ title: string; detail: string }>) {
