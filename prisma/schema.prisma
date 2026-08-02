@@ -1,0 +1,229 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RecordStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum MembershipScope {
+  OPERATOR
+  CLIENT
+  BRAND
+  WORKSPACE
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum WorkspaceKind {
+  GROWTH_OPERATIONS
+  CLIENT_PORTAL
+  INTERNAL
+}
+
+model OperatorOrganization {
+  id          String       @id @default(uuid()) @db.Uuid
+  slug        String       @unique @db.VarChar(80)
+  name        String       @db.VarChar(160)
+  status      RecordStatus @default(ACTIVE)
+  timezone    String       @default("America/Sao_Paulo") @db.VarChar(80)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  clients     ClientOrganization[]
+  brands      Brand[]
+  workspaces  Workspace[]
+  roles       Role[]
+  memberships Membership[]
+  auditEvents AuditEvent[]
+
+  @@map("operator_organizations")
+}
+
+model ClientOrganization {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String                 @map("operator_organization_id") @db.Uuid
+  slug                   String                 @db.VarChar(80)
+  name                   String                 @db.VarChar(160)
+  legalName              String?                @map("legal_name") @db.VarChar(200)
+  status                 RecordStatus           @default(ACTIVE)
+  locale                 String                 @default("pt-BR") @db.VarChar(20)
+  currency               String?                @default("BRL") @db.Char(3)
+  timezone               String                 @default("America/Sao_Paulo") @db.VarChar(80)
+  createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  brands               Brand[]
+  workspaces           Workspace[]
+  memberships          Membership[]
+  auditEvents          AuditEvent[]
+
+  @@unique([operatorOrganizationId, slug])
+  @@unique([id, operatorOrganizationId])
+  @@index([operatorOrganizationId, status])
+  @@map("client_organizations")
+}
+
+model Brand {
+  id                     String       @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String       @map("operator_organization_id") @db.Uuid
+  clientOrganizationId   String       @map("client_organization_id") @db.Uuid
+  slug                   String       @db.VarChar(80)
+  name                   String       @db.VarChar(160)
+  status                 RecordStatus @default(ACTIVE)
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  clientOrganization   ClientOrganization   @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
+  workspaces           Workspace[]
+  memberships          Membership[]
+
+  @@unique([clientOrganizationId, slug])
+  @@unique([id, clientOrganizationId, operatorOrganizationId])
+  @@index([operatorOrganizationId, clientOrganizationId, status])
+  @@map("brands")
+}
+
+model Workspace {
+  id                     String        @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String        @map("operator_organization_id") @db.Uuid
+  clientOrganizationId   String        @map("client_organization_id") @db.Uuid
+  brandId                String?       @map("brand_id") @db.Uuid
+  slug                   String        @db.VarChar(80)
+  name                   String        @db.VarChar(160)
+  kind                   WorkspaceKind @default(GROWTH_OPERATIONS)
+  status                 RecordStatus  @default(ACTIVE)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  clientOrganization   ClientOrganization   @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
+  brand                Brand?               @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  memberships          Membership[]
+  auditEvents          AuditEvent[]
+
+  @@unique([clientOrganizationId, slug])
+  @@unique([id, clientOrganizationId, operatorOrganizationId])
+  @@index([operatorOrganizationId, clientOrganizationId, status])
+  @@map("workspaces")
+}
+
+model User {
+  id        String       @id @default(uuid()) @db.Uuid
+  email     String       @unique @db.VarChar(320)
+  name      String?      @db.VarChar(160)
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships Membership[]
+  auditEvents AuditEvent[] @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Role {
+  id                     String  @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String? @map("operator_organization_id") @db.Uuid
+  code                   String  @db.VarChar(80)
+  name                   String  @db.VarChar(120)
+  description            String? @db.VarChar(500)
+  isSystem               Boolean @default(false) @map("is_system")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  operatorOrganization OperatorOrganization? @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  memberships          Membership[]
+  permissions          RolePermission[]
+
+  @@unique([operatorOrganizationId, code])
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique @db.VarChar(120)
+  description String @db.VarChar(500)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Membership {
+  id                     String           @id @default(uuid()) @db.Uuid
+  userId                 String           @map("user_id") @db.Uuid
+  roleId                 String           @map("role_id") @db.Uuid
+  operatorOrganizationId String           @map("operator_organization_id") @db.Uuid
+  clientOrganizationId   String?          @map("client_organization_id") @db.Uuid
+  brandId                String?          @map("brand_id") @db.Uuid
+  workspaceId            String?          @map("workspace_id") @db.Uuid
+  scope                  MembershipScope
+  status                 MembershipStatus @default(INVITED)
+  activatedAt            DateTime?        @map("activated_at") @db.Timestamptz(6)
+  revokedAt              DateTime?        @map("revoked_at") @db.Timestamptz(6)
+  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role                 Role                 @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  clientOrganization   ClientOrganization?  @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
+  brand                Brand?               @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  workspace            Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId, operatorOrganizationId, clientOrganizationId, brandId, workspaceId], map: "memberships_scope_identity_key")
+  @@index([userId, status])
+  @@index([operatorOrganizationId, clientOrganizationId, workspaceId, status])
+  @@map("memberships")
+}
+
+model AuditEvent {
+  id                     String   @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String   @map("operator_organization_id") @db.Uuid
+  clientOrganizationId   String?  @map("client_organization_id") @db.Uuid
+  workspaceId            String?  @map("workspace_id") @db.Uuid
+  actorUserId            String?  @map("actor_user_id") @db.Uuid
+  action                 String   @db.VarChar(120)
+  resourceType           String   @map("resource_type") @db.VarChar(120)
+  resourceId             String?  @map("resource_id") @db.VarChar(160)
+  requestId              String?  @map("request_id") @db.VarChar(160)
+  metadata               Json?
+  occurredAt             DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
+  clientOrganization   ClientOrganization?  @relation(fields: [clientOrganizationId], references: [id], onDelete: Restrict)
+  workspace            Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  actorUser            User?                @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([operatorOrganizationId, occurredAt])
+  @@index([clientOrganizationId, occurredAt])
+  @@index([workspaceId, occurredAt])
+  @@map("audit_events")
+}
