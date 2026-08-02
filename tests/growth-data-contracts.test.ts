@@ -24,9 +24,14 @@ describe("growth data contracts", () => {
     expect(() => assertEventBelongsToPack(pack, { eventType: "purchase" })).toThrow(/not declared/);
   });
 
-  it("creates tenant-aware event deduplication keys", () => {
-    expect(eventDeduplicationKey({ workspaceId: "ws-1", source: "csv", externalId: "row-10", id: "evt-1" }))
-      .toBe("ws-1:csv:row-10");
+  it("creates stable tenant-aware hashed event deduplication keys", () => {
+    const first = eventDeduplicationKey({ workspaceId: "ws-1", source: "csv", externalId: "row-10", id: "evt-1" });
+    const second = eventDeduplicationKey({ workspaceId: "ws-1", source: "csv", externalId: "row-10", id: "evt-2" });
+    const otherWorkspace = eventDeduplicationKey({ workspaceId: "ws-2", source: "csv", externalId: "row-10", id: "evt-1" });
+
+    expect(first).toHaveLength(64);
+    expect(first).toBe(second);
+    expect(first).not.toBe(otherWorkspace);
   });
 
   it("aggregates metric observations", () => {
