@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import type { GrowthActionItem, GrowthActionStatus } from "@/modules/growth-intelligence/action-workflow";
 import type { PlaybookRecommendation } from "@/modules/growth-intelligence/playbook-engine";
 
-import styles from "./command-center.module.css";
+import styles from "./action-workspace.module.css";
 
 type ExplicitWorkspaceTenant = {
   operatorOrganizationId: string;
@@ -80,32 +80,24 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
   }
 
   return (
-    <section className={styles.actionWorkspace} aria-label="Playbooks e ações humanas">
-      <div className={styles.signalHeader}>
-        <div>
-          <p className={styles.eyebrow}>Action Workspace</p>
-          <h2>Da recomendação explicável para a execução humana.</h2>
-        </div>
-        <span className={styles.context}>{actions.length} ações materializadas</span>
-      </div>
+    <section aria-label="Playbooks e ações humanas">
+      {error ? <div className={styles.error} role="alert">{error}</div> : null}
 
-      {error ? <div className={styles.actionError} role="alert">{error}</div> : null}
-
-      <div className={styles.actionColumns}>
+      <div className={styles.columns}>
         <div>
-          <h3 className={styles.actionColumnTitle}>Recomendações ativas</h3>
-          <div className={styles.actionStack}>
+          <h2 className={styles.columnTitle}>Recomendações ativas</h2>
+          <div className={styles.stack}>
             {recommendations.length === 0 ? (
-              <div className={styles.emptyBox}>Nenhuma recomendação declarativa está ativa para este período.</div>
+              <div className={styles.empty}>Nenhuma recomendação declarativa está ativa para este período.</div>
             ) : recommendations.map((recommendation) => {
               const existing = existingByRecommendation.get(recommendation.key);
               return (
-                <article className={styles.recommendationCard} key={recommendation.key}>
-                  <div className={styles.recommendationTopline}>
+                <article className={styles.card} key={recommendation.key}>
+                  <div className={styles.topline}>
                     <span>Prioridade {recommendation.priority}</span>
                     <span>{recommendation.ruleId}@{recommendation.ruleVersion}</span>
                   </div>
-                  <h4>{recommendation.title}</h4>
+                  <h3>{recommendation.title}</h3>
                   <p>{recommendation.rationale}</p>
                   <details className={styles.explainability}>
                     <summary>Por quê, evidências e checklist</summary>
@@ -121,10 +113,10 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
                     </div>
                   </details>
                   {existing ? (
-                    <span className={styles.actionStatus} data-status={existing.status}>{statusLabels[existing.status]}</span>
+                    <span className={styles.status} data-status={existing.status}>{statusLabels[existing.status]}</span>
                   ) : (
                     <button
-                      className={styles.primaryButton}
+                      className={styles.primary}
                       type="button"
                       disabled={busyKey === `create:${recommendation.key}`}
                       onClick={() => materialize(recommendation.key)}
@@ -139,28 +131,28 @@ export function ActionWorkspace({ tenant, from, to, recommendations, initialActi
         </div>
 
         <div>
-          <h3 className={styles.actionColumnTitle}>Fila operacional</h3>
-          <div className={styles.actionStack}>
+          <h2 className={styles.columnTitle}>Fila operacional</h2>
+          <div className={styles.stack}>
             {actions.length === 0 ? (
-              <div className={styles.emptyBox}>Nenhuma ação humana foi materializada neste workspace.</div>
+              <div className={styles.empty}>Nenhuma ação humana foi materializada neste workspace.</div>
             ) : actions.map((action) => (
-              <article className={styles.workItemCard} key={action.id}>
-                <div className={styles.recommendationTopline}>
-                  <span className={styles.actionStatus} data-status={action.status}>{statusLabels[action.status]}</span>
+              <article className={styles.card} key={action.id}>
+                <div className={styles.topline}>
+                  <span className={styles.status} data-status={action.status}>{statusLabels[action.status]}</span>
                   <span>Prioridade {action.priority}</span>
                 </div>
-                <h4>{action.title}</h4>
+                <h3>{action.title}</h3>
                 <p>{action.rationale}</p>
-                <div className={styles.workMeta}>
+                <div className={styles.meta}>
                   <span>Responsável: {action.responsibleUserId ?? "não definido"}</span>
                   <span>Regra: {action.ruleId}@{action.ruleVersion}</span>
                 </div>
-                <div className={styles.actionButtons}>
+                <div className={styles.actions}>
                   {nextStatuses(action.status).map((status) => (
                     <button
                       key={status}
                       type="button"
-                      className={status === "REJECTED" ? styles.secondaryButton : styles.primaryButton}
+                      className={status === "REJECTED" ? styles.secondary : styles.primary}
                       disabled={busyKey === `transition:${action.id}:${status}`}
                       onClick={() => transition(action.id, status)}
                     >
