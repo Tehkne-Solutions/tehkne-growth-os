@@ -1,5 +1,4 @@
-import { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/shared/db/prisma";
+import { Prisma, prisma } from "@/shared/db/prisma";
 import type { MetricImportPlan } from "./import-service";
 
 export type CommitMetricImportResult = {
@@ -104,7 +103,10 @@ export async function commitMetricImport(
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       const existing = await prisma.metricImportBatch.findUnique({
         where: {
           workspaceId_fingerprint: {
