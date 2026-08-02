@@ -10,9 +10,15 @@ import {
   listAuthorizedCommandCenterWorkspaces,
   type CommandCenterWorkspaceOption,
 } from "@/modules/command-center/workspaces";
-import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/authorized-intelligence";
+import {
+  loadAuthorizedInterpretedCommandCenterIntelligence,
+  type AuthorizedInterpretedCommandCenterIntelligence,
+} from "@/modules/growth-intelligence/authorized-intelligence";
 import { deriveDecisionSignals } from "@/modules/growth-intelligence/decision-signals";
-import type { InterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/enrich-command-center";
+import {
+  deriveMomentumDecisionSignals,
+  mergeDecisionSignals,
+} from "@/modules/growth-intelligence/momentum-signals";
 import { getSessionCookieName } from "@/modules/identity/http/security";
 import { parseTenantContext } from "@/modules/tenancy";
 import {
@@ -23,6 +29,7 @@ import { getDatabase } from "@/shared/db/client";
 
 import styles from "./command-center.module.css";
 import { GoalEditor } from "./goal-editor";
+import { MetricMomentum } from "./metric-momentum";
 
 type SearchValue = string | string[] | undefined;
 type CommandCenterPageProps = {
@@ -52,7 +59,7 @@ type PageState =
       kind: "intelligence";
       operatorOrganizationId: string;
       tenant: ExplicitWorkspaceTenant;
-      intelligence: InterpretedCommandCenterIntelligence;
+      intelligence: AuthorizedInterpretedCommandCenterIntelligence;
     };
 
 export default async function CommandCenterPage({ searchParams }: CommandCenterPageProps) {
@@ -151,10 +158,13 @@ function CommandCenterDashboard({
 }: Readonly<{
   operatorOrganizationId: string;
   tenant: ExplicitWorkspaceTenant;
-  intelligence: InterpretedCommandCenterIntelligence;
+  intelligence: AuthorizedInterpretedCommandCenterIntelligence;
 }>) {
   const snapshot = intelligence.current;
-  const signals = deriveDecisionSignals(intelligence.interpretedMetrics);
+  const signals = mergeDecisionSignals(
+    deriveDecisionSignals(intelligence.interpretedMetrics),
+    deriveMomentumDecisionSignals(intelligence.timeSeries),
+  );
 
   return (
     <main className={styles.page}>
@@ -166,7 +176,7 @@ function CommandCenterDashboard({
       <section className={styles.hero}>
         <div>
           <p className={styles.eyebrow}>Command Center · Growth Intelligence</p>
-          <h1 className={styles.title}>Sinais, metas e contexto para decidir o próximo movimento.</h1>
+          <h1 className={styles.title}>Sinais, metas, trajetória e contexto para decidir o próximo movimento.</h1>
         </div>
         <div className={styles.period}>{formatDate(snapshot.from)} — {formatDate(snapshot.to)}</div>
       </section>
@@ -202,6 +212,11 @@ function CommandCenterDashboard({
                 {formatComparison(metric.percentageDelta, metric.absoluteDelta, metric.currency)} · período anterior {formatMetric(metric.previousValue, metric.currency)}
               </p>
               <span className={styles.outcome}>{formatOutcome(metric.outcome)}</span>
+              <MetricMomentum
+                series={intelligence.timeSeries.find(
+                  (series) => series.metricId === metric.metricId && series.currency === metric.currency,
+                ) ?? null}
+              />
               <div className={styles.metricMeta}>
                 <div><span>Meta</span><strong>{metric.goal ? formatMetric(metric.goal.targetValue, metric.currency) : "—"}</strong></div>
                 <div><span>Gap</span><strong>{metric.goal ? formatMetric(metric.goal.absoluteGap, metric.currency) : "—"}</strong></div>
@@ -237,6 +252,12 @@ function CommandCenterDashboard({
           <p className={styles.eyebrow}>Semântica</p>
           <h2>{intelligence.sectorPack ? `${intelligence.sectorPack.id}@${intelligence.sectorPack.version}` : "Sem Sector Pack"}</h2>
           <p>Melhora, piora e contexto são derivados do Sector Pack comprometido, nunca inferidos apenas pela direção numérica.</p>
+        </article>
+
+        <article className={styles.infoCard}>
+          <p className={styles.eyebrow}>Histórico</p>
+          <h2>{intelligence.timeSeries.length} séries multi-período</h2>
+          <p>Cada KPI pode usar até seis janelas equivalentes para distinguir tendência, aceleração, desaceleração e reversão.</p>
         </article>
 
         <article className={styles.infoCard}>
