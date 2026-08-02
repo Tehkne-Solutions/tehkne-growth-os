@@ -6,12 +6,13 @@ import {
   PrismaIdentityRepository,
   validateSession,
 } from "@/modules/identity";
-import { loadAuthorizedCommandCenterIntelligence } from "@/modules/command-center/authorized-query";
-import type { CommandCenterIntelligence } from "@/modules/command-center/intelligence";
 import {
   listAuthorizedCommandCenterWorkspaces,
   type CommandCenterWorkspaceOption,
 } from "@/modules/command-center/workspaces";
+import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/authorized-intelligence";
+import { deriveDecisionSignals } from "@/modules/growth-intelligence/decision-signals";
+import type { InterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/enrich-command-center";
 import { getSessionCookieName } from "@/modules/identity/http/security";
 import { parseTenantContext } from "@/modules/tenancy";
 import {
@@ -21,10 +22,18 @@ import {
 import { getDatabase } from "@/shared/db/client";
 
 import styles from "./command-center.module.css";
+import { GoalEditor } from "./goal-editor";
 
 type SearchValue = string | string[] | undefined;
 type CommandCenterPageProps = {
   searchParams: Promise<Record<string, SearchValue>>;
+};
+
+type ExplicitWorkspaceTenant = {
+  operatorOrganizationId: string;
+  clientOrganizationId: string;
+  brandId?: string;
+  workspaceId: string;
 };
 
 type PageState =
@@ -42,7 +51,8 @@ type PageState =
   | {
       kind: "intelligence";
       operatorOrganizationId: string;
-      intelligence: CommandCenterIntelligence;
+      tenant: ExplicitWorkspaceTenant;
+      intelligence: InterpretedCommandCenterIntelligence;
     };
 
 export default async function CommandCenterPage({ searchParams }: CommandCenterPageProps) {
@@ -60,7 +70,7 @@ export default async function CommandCenterPage({ searchParams }: CommandCenterP
     case "workspace-selection":
       return <WorkspaceSelectionPage operatorOrganizationId={state.operatorOrganizationId} workspaces={state.workspaces} from={state.from} to={state.to} />;
     case "intelligence":
-      return <CommandCenterDashboard operatorOrganizationId={state.operatorOrganizationId} intelligence={state.intelligence} />;
+      return <CommandCenterDashboard operatorOrganizationId={state.operatorOrganizationId} tenant={state.tenant} intelligence={state.intelligence} />;
   }
 }
 
@@ -100,7 +110,7 @@ async function resolvePageState(params: Record<string, SearchValue>): Promise<Pa
       brandId: context.brandId,
       workspaceId: context.workspaceId,
     });
-    const intelligence = await loadAuthorizedCommandCenterIntelligence(
+    const intelligence = await loadAuthorizedInterpretedCommandCenterIntelligence(
       { database, authorizationStore: identityRepository },
       {
         userId: session.userId,
@@ -110,7 +120,23 @@ async function resolvePageState(params: Record<string, SearchValue>): Promise<Pa
       },
     );
 
-    return { kind: "intelligence", operatorOrganizationId, intelligence };
+    return {
+      kind: "intelligence",
+      operatorOrganizationId,
+      tenant: context.brandId
+        ? {
+            operatorOrganizationId: context.operatorOrganizationId,
+            clientOrganizationId: context.clientOrganizationId,
+            brandId: context.brandId,
+            workspaceId: context.workspaceId,
+          }
+        : {
+            operatorOrganizationId: context.operatorOrganizationId,
+            clientOrganizationId: context.clientOrganizationId,
+            workspaceId: context.workspaceId,
+          },
+      intelligence,
+    };
   } catch (error) {
     if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
     if (error instanceof AuthorizationDeniedError) return { kind: "forbidden" };
@@ -120,12 +146,15 @@ async function resolvePageState(params: Record<string, SearchValue>): Promise<Pa
 
 function CommandCenterDashboard({
   operatorOrganizationId,
+  tenant,
   intelligence,
 }: Readonly<{
   operatorOrganizationId: string;
-  intelligence: CommandCenterIntelligence;
+  tenant: ExplicitWorkspaceTenant;
+  intelligence: InterpretedCommandCenterIntelligence;
 }>) {
   const snapshot = intelligence.current;
+  const signals = deriveDecisionSignals(intelligence.interpretedMetrics);
 
   return (
     <main className={styles.page}>
@@ -137,20 +166,53 @@ function CommandCenterDashboard({
       <section className={styles.hero}>
         <div>
           <p className={styles.eyebrow}>Command Center · Growth Intelligence</p>
-          <h1 className={styles.title}>Sinais, tendência e contexto para decidir o próximo movimento.</h1>
+          <h1 className={styles.title}>Sinais, metas e contexto para decidir o próximo movimento.</h1>
         </div>
         <div className={styles.period}>{formatDate(snapshot.from)} — {formatDate(snapshot.to)}</div>
       </section>
 
-      {intelligence.metrics.length > 0 ? (
+      {signals.length > 0 ? (
+        <section className={styles.signalSection} aria-label="Sinais de decisão">
+          <div className={styles.signalHeader}>
+            <div>
+              <p className={styles.eyebrow}>Decision Signals</p>
+              <h2>O que merece atenção agora.</h2>
+            </div>
+            <span className={styles.context}>{signals.length} sinais derivados de dados persistidos</span>
+          </div>
+          <div className={styles.signalGrid}>
+            {signals.slice(0, 6).map((signal) => (
+              <article className={styles.signalCard} data-severity={signal.severity} key={signal.key}>
+                <span className={styles.signalMeta}>{signal.severity} · prioridade {signal.priority}</span>
+                <h3>{signal.title}</h3>
+                <p>{signal.detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {intelligence.interpretedMetrics.length > 0 ? (
         <section className={styles.metrics} aria-label="Métricas do período">
-          {intelligence.metrics.map((metric) => (
+          {intelligence.interpretedMetrics.map((metric) => (
             <article className={styles.metricCard} key={`${metric.metricId}:${metric.currency ?? "none"}`}>
               <p className={styles.metricLabel}>{humanizeMetric(metric.metricId)}</p>
               <p className={styles.metricValue}>{formatMetric(metric.currentValue, metric.currency)}</p>
               <p className={styles.context}>
                 {formatComparison(metric.percentageDelta, metric.absoluteDelta, metric.currency)} · período anterior {formatMetric(metric.previousValue, metric.currency)}
               </p>
+              <span className={styles.outcome}>{formatOutcome(metric.outcome)}</span>
+              <div className={styles.metricMeta}>
+                <div><span>Meta</span><strong>{metric.goal ? formatMetric(metric.goal.targetValue, metric.currency) : "—"}</strong></div>
+                <div><span>Gap</span><strong>{metric.goal ? formatMetric(metric.goal.absoluteGap, metric.currency) : "—"}</strong></div>
+                <div><span>Atingimento</span><strong>{metric.goal ? formatAttainment(metric.goal.attainmentPercent) : "—"}</strong></div>
+              </div>
+              <GoalEditor
+                tenant={tenant}
+                metricId={metric.metricId}
+                currency={metric.currency}
+                currentGoal={metric.goal?.targetValue ?? null}
+              />
             </article>
           ))}
         </section>
@@ -172,9 +234,9 @@ function CommandCenterDashboard({
         </article>
 
         <article className={styles.infoCard}>
-          <p className={styles.eyebrow}>Comparação</p>
-          <h2>{formatDate(intelligence.previous.from)} — {formatDate(intelligence.previous.to)}</h2>
-          <p>O baseline usa uma janela imediatamente anterior com duração equivalente à janela atual.</p>
+          <p className={styles.eyebrow}>Semântica</p>
+          <h2>{intelligence.sectorPack ? `${intelligence.sectorPack.id}@${intelligence.sectorPack.version}` : "Sem Sector Pack"}</h2>
+          <p>Melhora, piora e contexto são derivados do Sector Pack comprometido, nunca inferidos apenas pela direção numérica.</p>
         </article>
 
         <article className={styles.infoCard}>
@@ -316,6 +378,21 @@ function first(value: SearchValue): string | undefined {
 
 function humanizeMetric(metricId: string): string {
   return metricId.replaceAll("_", " ");
+}
+
+function formatOutcome(outcome: string): string {
+  switch (outcome) {
+    case "improved": return "Melhorou";
+    case "worsened": return "Piorou";
+    case "neutral": return "Estável";
+    case "context-required": return "Requer contexto";
+    default: return "Sem semântica";
+  }
+}
+
+function formatAttainment(value: number | null): string {
+  if (value === null) return "—";
+  return `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 }
 
 function formatComparison(percentageDelta: number | null, absoluteDelta: number, currency: string | null): string {
