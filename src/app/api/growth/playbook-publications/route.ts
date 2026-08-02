@@ -18,6 +18,7 @@ import {
   PlaybookPublicationValidationError,
   transitionPlaybookPublicationCandidate,
 } from "@/modules/growth-intelligence/playbook-publishing";
+import type { DeclarativePlaybookRule } from "@/modules/growth-intelligence/playbooks";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
             userId: session.userId,
             tenant,
             proposalId: body.proposalId,
-            candidateRule: body.candidateRule,
+            candidateRule: normalizeRule(body.candidateRule),
           },
         )
       : await transitionPlaybookPublicationCandidate(
@@ -123,6 +124,30 @@ export async function POST(request: Request) {
     }
     return Response.json({ error: "playbook_publication_unavailable" }, { status: 503 });
   }
+}
+
+function normalizeRule(value: z.infer<typeof ruleSchema>): DeclarativePlaybookRule {
+  return {
+    id: value.id,
+    version: value.version,
+    name: value.name,
+    status: value.status,
+    priority: value.priority,
+    when: {
+      ...(value.when.metricId === undefined ? {} : { metricId: value.when.metricId }),
+      ...(value.when.severity === undefined ? {} : { severity: value.when.severity }),
+      ...(value.when.momentum === undefined ? {} : { momentum: value.when.momentum }),
+      ...(value.when.performanceMomentum === undefined
+        ? {}
+        : { performanceMomentum: value.when.performanceMomentum }),
+    },
+    action: {
+      id: value.action.id,
+      title: value.action.title,
+      rationale: value.action.rationale,
+      checklist: value.action.checklist,
+    },
+  };
 }
 
 function serialize(candidate: Awaited<ReturnType<typeof createPlaybookPublicationCandidate>>) {
