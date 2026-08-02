@@ -7,9 +7,11 @@ import {
   validateSession,
 } from "@/modules/identity";
 import { getSessionCookieName } from "@/modules/identity/http/security";
+import { listActionEffectiveness, type ActionEffectivenessRecord } from "@/modules/growth-intelligence/action-effectiveness";
 import { loadAuthorizedInterpretedCommandCenterIntelligence } from "@/modules/growth-intelligence/authorized-intelligence";
 import { listGrowthActions, type GrowthActionItem } from "@/modules/growth-intelligence/action-workflow";
 import type { PlaybookRecommendation } from "@/modules/growth-intelligence/playbook-engine";
+import { summarizeEffectiveness, type EffectivenessSummary } from "@/modules/growth-intelligence/playbook-effectiveness";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -40,6 +42,8 @@ type PageState =
       context: WorkspaceContext;
       recommendations: readonly PlaybookRecommendation[];
       actions: readonly GrowthActionItem[];
+      outcomes: readonly ActionEffectivenessRecord[];
+      effectiveness: EffectivenessSummary;
       backQuery: string;
     };
 
@@ -80,13 +84,18 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       { database, authorizationStore: identityRepository },
       { userId: session.userId, tenant, from: context.from, to: context.to },
     );
-    const actions = await listGrowthActions(database, context.tenant.workspaceId);
+    const [actions, outcomes] = await Promise.all([
+      listGrowthActions(database, context.tenant.workspaceId),
+      listActionEffectiveness(database, context.tenant.workspaceId),
+    ]);
 
     return {
       kind: "ready",
       context,
       recommendations: intelligence.recommendations,
       actions,
+      outcomes,
+      effectiveness: summarizeEffectiveness(outcomes),
       backQuery: toSearchParams(params),
     };
   } catch (error) {
@@ -102,7 +111,7 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Tehkné Growth OS · Action Workspace</p>
-          <h1 className={styles.title}>Recomendações explicáveis, trabalho humano e rastreabilidade.</h1>
+          <h1 className={styles.title}>Recomendações, execução humana e aprendizado mensurável.</h1>
         </div>
         <div>
           <div className={styles.period}>{formatDate(state.context.from)} — {formatDate(state.context.to)}</div>
@@ -116,6 +125,8 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
         to={state.context.to.toISOString()}
         recommendations={state.recommendations}
         initialActions={state.actions}
+        initialOutcomes={state.outcomes}
+        initialEffectiveness={state.effectiveness}
       />
     </main>
   );
