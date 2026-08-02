@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { loadDeclarativePlaybook } from "@/modules/growth-intelligence/load-playbook";
 import {
+  buildRollbackRule,
   buildRuleDiff,
   canTransitionPlaybookPublication,
+  nextPatchVersion,
 } from "@/modules/growth-intelligence/playbook-publishing";
 import type { DeclarativePlaybookRule } from "@/modules/growth-intelligence/playbooks";
 
@@ -52,6 +54,15 @@ describe("governed playbook publishing", () => {
     expect(diff).toHaveProperty("action");
     expect(diff).not.toHaveProperty("name");
     expect(baseRule.version).toBe("1.0.0");
+  });
+
+  it("creates rollback content from canonical state with a monotonic version", () => {
+    const rollback = buildRollbackRule(candidateRule, baseRule);
+    expect(nextPatchVersion("1.1.0")).toBe("1.1.1");
+    expect(rollback.version).toBe("1.1.1");
+    expect(rollback.priority).toBe(baseRule.priority);
+    expect(rollback.action.rationale).toBe(baseRule.action.rationale);
+    expect(candidateRule.version).toBe("1.1.0");
   });
 
   it("overlays only published rules for the requested workspace", async () => {

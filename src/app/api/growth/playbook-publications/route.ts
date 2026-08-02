@@ -14,6 +14,7 @@ import {
 } from "@/modules/identity/http/security";
 import {
   createPlaybookPublicationCandidate,
+  createPlaybookRollbackCandidate,
   PlaybookPublicationNotFoundError,
   PlaybookPublicationValidationError,
   transitionPlaybookPublicationCandidate,
@@ -58,6 +59,11 @@ const requestSchema = z.discriminatedUnion("intent", [
     candidateRule: ruleSchema,
   }).strict(),
   z.object({
+    intent: z.literal("rollback"),
+    tenant: tenantSchema,
+    publishedCandidateId: z.uuid(),
+  }).strict(),
+  z.object({
     intent: z.literal("transition"),
     tenant: tenantSchema,
     candidateId: z.uuid(),
@@ -81,28 +87,40 @@ export async function POST(request: Request) {
     const body = requestSchema.parse(await request.json());
     const tenant = parseTenantContext(body.tenant);
 
-    const candidate = body.intent === "create"
-      ? await createPlaybookPublicationCandidate(
-          { database, authorizationStore: repository },
-          {
-            userId: session.userId,
-            tenant,
-            proposalId: body.proposalId,
-            candidateRule: normalizeRule(body.candidateRule),
-          },
-        )
-      : await transitionPlaybookPublicationCandidate(
-          { database, authorizationStore: repository },
-          {
-            userId: session.userId,
-            tenant,
-            candidateId: body.candidateId,
-            status: body.status,
-          },
-        );
+    let candidate;
+    if (body.intent === "create") {
+      candidate = await createPlaybookPublicationCandidate(
+        { database, authorizationStore: repository },
+        {
+          userId: session.userId,
+          tenant,
+          proposalId: body.proposalId,
+          candidateRule: normalizeRule(body.candidateRule),
+        },
+      );
+    } else if (body.intent === "rollback") {
+      candidate = await createPlaybookRollbackCandidate(
+        { database, authorizationStore: repository },
+        {
+          userId: session.userId,
+          tenant,
+          publishedCandidateId: body.publishedCandidateId,
+        },
+      );
+    } else {
+      candidate = await transitionPlaybookPublicationCandidate(
+        { database, authorizationStore: repository },
+        {
+          userId: session.userId,
+          tenant,
+          candidateId: body.candidateId,
+          status: body.status,
+        },
+      );
+    }
 
     return Response.json(serialize(candidate), {
-      status: body.intent === "create" ? 201 : 200,
+      status: body.intent === "transition" ? 200 : 201,
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
