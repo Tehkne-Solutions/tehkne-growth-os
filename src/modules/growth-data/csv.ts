@@ -20,18 +20,24 @@ export function parseMetricCsvRow(
 
   if (!row.metric_id?.trim()) throw new Error("metric_id is required");
   if (!Number.isFinite(value)) throw new Error("value must be numeric");
-  if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) throw new Error("Invalid metric period");
-  if (periodEnd < periodStart) throw new Error("period_end must be greater than or equal to period_start");
+  if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+    throw new Error("Invalid metric period");
+  }
+  if (periodEnd < periodStart) {
+    throw new Error("period_end must be greater than or equal to period_start");
+  }
 
-  return {
+  const currency = row.currency?.trim();
+  const observation = {
     id,
     workspaceId,
     metricId: row.metric_id.trim(),
     periodStart,
     periodEnd,
     value,
-    currency: row.currency?.trim() || undefined,
     source: row.source?.trim() || "csv",
     dimensions: {},
-  };
+  } satisfies Omit<MetricObservation, "currency">;
+
+  return currency ? { ...observation, currency } : observation;
 }
