@@ -8,7 +8,7 @@ Transformar a fundação segura do Tehkné Growth OS em um núcleo capaz de comp
 
 ### GDC-01 — Sector Pack Registry
 
-Status: implementado no incremento atual.
+Status: implementado.
 
 - manifestos declarativos e versionados;
 - contratos TypeScript;
@@ -18,7 +18,7 @@ Status: implementado no incremento atual.
 
 ### GDC-02 — Funnels, Metrics & Events
 
-Status: implementado no incremento atual.
+Status: implementado.
 
 - eventos tenant-aware;
 - observações de métricas;
@@ -28,14 +28,16 @@ Status: implementado no incremento atual.
 
 ### GDC-03 — CSV Import
 
-Status: fundação implementada.
+Status: parser e preview implementados.
 
 - linha canônica de observação de métrica;
 - normalização de período, valor, fonte e moeda;
-- rejeição de valores e períodos inválidos;
+- parser de arquivo CSV com campos entre aspas;
+- preview de linhas aceitas;
+- relatório de rejeições por linha;
 - arquivo de exemplo.
 
-Próximo incremento: parser de arquivo completo, preview, relatório de rejeições, idempotência e persistência transacional.
+Próximo incremento: idempotência e persistência transacional do batch.
 
 ### GDC-04 — Persistence
 
