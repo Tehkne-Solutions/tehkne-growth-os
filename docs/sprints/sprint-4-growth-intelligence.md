@@ -41,7 +41,7 @@ Status: implementado e integrado à `main`.
 - `direction` do Sector Pack é a fonte canônica para interpretação;
 - movimento e resultado permanecem conceitos separados;
 - métricas `contextual` nunca recebem julgamento automático;
-- manifests reais suportam IDs canônicos de métricas, eventos e stages em `snake_case`.
+- manifests reais suportam IDs canônicos em `snake_case`.
 
 ## INT-05 — Effective-Dated Metric Goals
 
@@ -56,88 +56,64 @@ Status: implementado e integrado à `main`.
 
 Status: implementado e integrado à `main`.
 
-Pipeline:
-
-`comparação numérica → pack versionado → direção semântica → meta vigente → outcome/attainment`
+Pipeline: `comparação numérica → pack versionado → direção semântica → meta vigente → outcome/attainment`.
 
 ## INT-07 — Prisma MetricGoal
 
 Status: implementado e integrado à `main`.
 
-- `MetricGoal` espelhado no schema Prisma;
-- relação explícita com `Workspace`;
-- leituras de meta migradas de SQL dedicado para Prisma.
-
 ## INT-08 — Goal Management Permission
 
 Status: implementado e integrado à `main`.
-
-- permissão `growth.goals.manage` persistida no catálogo;
-- workspace bruto nunca é tratado como autorização.
 
 ## INT-09 — Audited Goal Mutation
 
 Status: implementado e integrado à `main`.
 
-- `POST /api/growth/goals` protegido por same-origin, sessão, tenant e RBAC;
-- métrica validada contra o último Sector Pack `COMMITTED`;
-- meta anterior é fechada antes de uma nova entrar em vigor;
-- meta e `AuditEvent` são persistidos na mesma transação.
-
 ## INT-10 — Goal Mutation Coverage
 
 Status: implementado e integrado à `main`.
-
-- testes de autorização antecipada;
-- métrica inválida rejeitada;
-- criação transacional de meta + auditoria;
-- manifest real do pack Education validado pelo gate.
 
 ## INT-11 — Goals UI
 
 Status: implementado e integrado à `main`.
 
-- cada KPI mostra Meta, Gap e Atingimento;
-- outcome semântico é apresentado como Melhorou, Piorou, Estável ou Requer contexto;
-- editor contextual permite definir ou substituir a meta sem JSON/API manual;
-- o editor reutiliza a API segura existente e nunca recebe liberdade para escolher Sector Pack arbitrário.
-
 ## INT-12 — Decision Signals
 
 Status: implementado e integrado à `main`.
 
-- sinais derivados exclusivamente de `InterpretedCommandCenterMetric`;
-- prioridade determinística e explicável;
-- `worsened + not-met` recebe prioridade crítica;
-- `not-met` e `worsened` isolados recebem warning;
-- `improved + met` gera sinal positivo;
-- métricas contextuais continuam explicitamente sem julgamento;
-- nenhum texto de sinal depende de LLM ou recomendação inventada.
-
 ## INT-13 — Time Series & Momentum
 
-Status: domínio e loader autorizado implementados neste incremento.
+Status: implementado e integrado à `main`.
 
 - seis janelas equivalentes e adjacentes compõem a série padrão;
-- o período selecionado continua sendo a unidade de comparação, evitando mistura de granularidades;
 - tendência numérica é classificada como `rising`, `falling`, `flat`, `mixed` ou `insufficient-data`;
 - momentum é classificado como `accelerating`, `decelerating`, `steady`, `reversal` ou `insufficient-data`;
-- desempenho continua separado da direção numérica e usa o `direction` do Sector Pack;
-- métricas contextuais permanecem `context-required`;
-- todas as janelas históricas reutilizam exclusivamente o `workspaceId` que já passou por `growth.command_center.read`;
-- testes verificam isolamento do workspace em todas as consultas históricas.
+- desempenho usa o `direction` do Sector Pack e continua separado da direção numérica;
+- todas as janelas históricas reutilizam exclusivamente o workspace já autorizado.
+
+## INT-14 — Momentum UI & Sparklines
+
+Status: implementado neste incremento.
+
+- cada KPI recebe sparkline SVG server-side com as seis janelas equivalentes;
+- tendência, momentum e performance momentum aparecem no próprio card;
+- a visualização não cria uma nova fonte de dados nem roda lógica de negócio no cliente;
+- piora acelerando gera sinal adicional de trajetória;
+- melhora acelerando gera confirmação positiva;
+- reversão gera sinal contextual de mudança de regime;
+- sinais de meta continuam com prioridade superior aos sinais de momentum;
+- nenhuma reversão é classificada automaticamente como boa ou ruim.
 
 ## Próximos incrementos
 
-- renderizar sparklines reais e momentum no Command Center;
-- combinar momentum com Decision Signals sem esconder a regra de origem;
+- playbooks declarativos e recomendações explicáveis;
 - persistência opcional de sinais para histórico operacional;
 - regras de severidade configuráveis por Sector Pack;
-- recomendações explicáveis baseadas em playbooks declarativos;
 - visão executiva cross-workspace com RBAC próprio.
 
 ## Critério de saída
 
-Um usuário autorizado deve conseguir distinguir movimento de desempenho, comparar o período selecionado com baseline equivalente, avaliar e administrar metas reais do workspace, identificar prioridades derivadas de regras explícitas e consultar momentum multi-período sem mistura de tenant, porcentagens inválidas ou inferência semântica não declarada.
+Um usuário autorizado deve conseguir distinguir movimento, desempenho, meta e trajetória multi-período no mesmo Command Center, com sinais determinísticos, isolamento tenant-aware e sem inferência semântica não declarada.
 
 Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.
