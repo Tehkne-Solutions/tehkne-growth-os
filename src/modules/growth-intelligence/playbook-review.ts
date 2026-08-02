@@ -192,7 +192,7 @@ async function audit(
   userId: string,
   resourceId: string,
   action: string,
-  metadata: Record<string, unknown>,
+  metadata: Readonly<Record<string, string>>,
 ) {
   await database.auditEvent.create({
     data: {
