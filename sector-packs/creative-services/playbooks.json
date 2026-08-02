@@ -1,0 +1,52 @@
+{
+  "sectorPackId": "creative-services",
+  "sectorPackVersion": "1.0.0",
+  "rules": [
+    {
+      "id": "win-rate-warning-review",
+      "version": "1.0.0",
+      "name": "Revisar fechamento quando win rate degrada",
+      "status": "active",
+      "priority": 90,
+      "when": {
+        "metricId": "win_rate",
+        "severity": "warning",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-commercial-conversion",
+        "title": "Revisar conversão comercial",
+        "rationale": "Queda de fechamento deve ser separada entre qualidade do lead, briefing, proposta e follow-up antes de mudar aquisição.",
+        "checklist": [
+          "Comparar win rate por origem do lead",
+          "Revisar tempo entre briefing e proposta",
+          "Mapear principais motivos de perda",
+          "Comparar ticket e escopo das propostas perdidas"
+        ]
+      }
+    },
+    {
+      "id": "cpl-critical-review",
+      "version": "1.0.0",
+      "name": "Revisar aquisição quando CPL degrada",
+      "status": "active",
+      "priority": 100,
+      "when": {
+        "metricId": "cpl",
+        "severity": "critical",
+        "performanceMomentum": "worsening"
+      },
+      "action": {
+        "id": "review-acquisition-efficiency",
+        "title": "Revisar eficiência de aquisição",
+        "rationale": "CPL acima da meta e em trajetória adversa pede diagnóstico da campanha e da proposta de valor antes de escalar investimento.",
+        "checklist": [
+          "Comparar CPL por campanha e criativo",
+          "Revisar mensagem e proposta de valor",
+          "Checar conversão do formulário ou landing page",
+          "Comparar qualidade dos briefings gerados por origem"
+        ]
+      }
+    }
+  ]
+}
