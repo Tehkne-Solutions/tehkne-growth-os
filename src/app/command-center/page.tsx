@@ -6,10 +6,8 @@ import {
   PrismaIdentityRepository,
   validateSession,
 } from "@/modules/identity";
-import {
-  loadAuthorizedCommandCenterSnapshot,
-} from "@/modules/command-center/authorized-query";
-import type { CommandCenterSnapshot } from "@/modules/command-center/query";
+import { loadAuthorizedCommandCenterIntelligence } from "@/modules/command-center/authorized-query";
+import type { CommandCenterIntelligence } from "@/modules/command-center/intelligence";
 import {
   listAuthorizedCommandCenterWorkspaces,
   type CommandCenterWorkspaceOption,
@@ -42,71 +40,31 @@ type PageState =
       to: string | undefined;
     }
   | {
-      kind: "snapshot";
+      kind: "intelligence";
       operatorOrganizationId: string;
-      snapshot: CommandCenterSnapshot;
+      intelligence: CommandCenterIntelligence;
     };
 
-export default async function CommandCenterPage({
-  searchParams,
-}: CommandCenterPageProps) {
+export default async function CommandCenterPage({ searchParams }: CommandCenterPageProps) {
   const state = await resolvePageState(await searchParams);
 
   switch (state.kind) {
     case "operator-required":
-      return (
-        <StatePage
-          title="Selecione uma operadora"
-          detail="O Command Center começa em um contexto de tenant explícito. Informe a operadora para descobrir apenas os workspaces permitidos pela sua membership."
-          code="operatorOrganizationId"
-        />
-      );
+      return <StatePage title="Selecione uma operadora" detail="O Command Center começa em um contexto de tenant explícito. Informe a operadora para descobrir apenas os workspaces permitidos pela sua membership." code="operatorOrganizationId" />;
     case "authentication-required":
-      return (
-        <StatePage
-          title="Autenticação necessária"
-          detail="Entre no Tehkné Growth OS antes de acessar dados operacionais."
-          code="401 · authentication_required"
-        />
-      );
+      return <StatePage title="Autenticação necessária" detail="Entre no Tehkné Growth OS antes de acessar dados operacionais." code="401 · authentication_required" />;
     case "forbidden":
-      return (
-        <StatePage
-          title="Acesso não autorizado"
-          detail="Sua membership atual não concede leitura do Command Center neste workspace."
-          code="403 · growth.command_center.read"
-        />
-      );
+      return <StatePage title="Acesso não autorizado" detail="Sua membership atual não concede leitura do Command Center neste workspace." code="403 · growth.command_center.read" />;
     case "unavailable":
-      return (
-        <StatePage
-          title="Command Center indisponível"
-          detail="Não foi possível carregar o snapshot persistido deste workspace."
-          code="command_center_unavailable"
-        />
-      );
+      return <StatePage title="Command Center indisponível" detail="Não foi possível carregar a inteligência persistida deste workspace." code="command_center_unavailable" />;
     case "workspace-selection":
-      return (
-        <WorkspaceSelectionPage
-          operatorOrganizationId={state.operatorOrganizationId}
-          workspaces={state.workspaces}
-          from={state.from}
-          to={state.to}
-        />
-      );
-    case "snapshot":
-      return (
-        <CommandCenterDashboard
-          operatorOrganizationId={state.operatorOrganizationId}
-          snapshot={state.snapshot}
-        />
-      );
+      return <WorkspaceSelectionPage operatorOrganizationId={state.operatorOrganizationId} workspaces={state.workspaces} from={state.from} to={state.to} />;
+    case "intelligence":
+      return <CommandCenterDashboard operatorOrganizationId={state.operatorOrganizationId} intelligence={state.intelligence} />;
   }
 }
 
-async function resolvePageState(
-  params: Record<string, SearchValue>,
-): Promise<PageState> {
+async function resolvePageState(params: Record<string, SearchValue>): Promise<PageState> {
   const operatorOrganizationId = first(params.operatorOrganizationId);
   if (!operatorOrganizationId) return { kind: "operator-required" };
 
@@ -114,9 +72,7 @@ async function resolvePageState(
     const environment = parseServerEnvironment(process.env);
     const secret = requireSessionSecret(environment);
     const cookieStore = await cookies();
-    const token = cookieStore.get(
-      getSessionCookieName(environment.NODE_ENV),
-    )?.value;
+    const token = cookieStore.get(getSessionCookieName(environment.NODE_ENV))?.value;
     if (!token) throw new InvalidSessionError();
 
     const database = getDatabase();
@@ -144,7 +100,7 @@ async function resolvePageState(
       brandId: context.brandId,
       workspaceId: context.workspaceId,
     });
-    const snapshot = await loadAuthorizedCommandCenterSnapshot(
+    const intelligence = await loadAuthorizedCommandCenterIntelligence(
       { database, authorizationStore: identityRepository },
       {
         userId: session.userId,
@@ -154,62 +110,46 @@ async function resolvePageState(
       },
     );
 
-    return { kind: "snapshot", operatorOrganizationId, snapshot };
+    return { kind: "intelligence", operatorOrganizationId, intelligence };
   } catch (error) {
-    if (error instanceof InvalidSessionError) {
-      return { kind: "authentication-required" };
-    }
-    if (error instanceof AuthorizationDeniedError) {
-      return { kind: "forbidden" };
-    }
+    if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
+    if (error instanceof AuthorizationDeniedError) return { kind: "forbidden" };
     return { kind: "unavailable" };
   }
 }
 
 function CommandCenterDashboard({
   operatorOrganizationId,
-  snapshot,
+  intelligence,
 }: Readonly<{
   operatorOrganizationId: string;
-  snapshot: CommandCenterSnapshot;
+  intelligence: CommandCenterIntelligence;
 }>) {
+  const snapshot = intelligence.current;
+
   return (
     <main className={styles.page}>
       <div className={styles.topbar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark} />
-          Tehkné Growth OS
-        </div>
-        <a
-          className={styles.contextLink}
-          href={`/command-center?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`}
-        >
-          Trocar workspace
-        </a>
+        <div className={styles.brand}><span className={styles.brandMark} />Tehkné Growth OS</div>
+        <a className={styles.contextLink} href={`/command-center?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`}>Trocar workspace</a>
       </div>
 
       <section className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>Command Center · dados persistidos</p>
-          <h1 className={styles.title}>
-            Sinais de Growth em um único contexto operacional.
-          </h1>
+          <p className={styles.eyebrow}>Command Center · Growth Intelligence</p>
+          <h1 className={styles.title}>Sinais, tendência e contexto para decidir o próximo movimento.</h1>
         </div>
-        <div className={styles.period}>
-          {formatDate(snapshot.from)} — {formatDate(snapshot.to)}
-        </div>
+        <div className={styles.period}>{formatDate(snapshot.from)} — {formatDate(snapshot.to)}</div>
       </section>
 
-      {snapshot.metrics.length > 0 ? (
+      {intelligence.metrics.length > 0 ? (
         <section className={styles.metrics} aria-label="Métricas do período">
-          {snapshot.metrics.map((metric) => (
-            <article
-              className={styles.metricCard}
-              key={`${metric.metricId}:${metric.currency ?? "none"}`}
-            >
+          {intelligence.metrics.map((metric) => (
+            <article className={styles.metricCard} key={`${metric.metricId}:${metric.currency ?? "none"}`}>
               <p className={styles.metricLabel}>{humanizeMetric(metric.metricId)}</p>
-              <p className={styles.metricValue}>
-                {formatMetric(metric.value, metric.currency)}
+              <p className={styles.metricValue}>{formatMetric(metric.currentValue, metric.currency)}</p>
+              <p className={styles.context}>
+                {formatComparison(metric.percentageDelta, metric.absoluteDelta, metric.currency)} · período anterior {formatMetric(metric.previousValue, metric.currency)}
               </p>
             </article>
           ))}
@@ -219,10 +159,7 @@ function CommandCenterDashboard({
           <article className={styles.infoCard}>
             <p className={styles.eyebrow}>Estado vazio</p>
             <h2>Nenhuma métrica neste período.</h2>
-            <p>
-              O painel não inventa valores. Importe observações canônicas ou
-              selecione outro período para visualizar KPIs.
-            </p>
+            <p>O painel não inventa valores. Importe observações canônicas ou selecione outro período para visualizar KPIs.</p>
           </article>
         </section>
       )}
@@ -231,10 +168,13 @@ function CommandCenterDashboard({
         <article className={styles.infoCard}>
           <p className={styles.eyebrow}>Eventos</p>
           <h2>{snapshot.eventCount.toLocaleString("pt-BR")} eventos no período</h2>
-          <p>
-            Contagem derivada somente de eventos persistidos dentro do workspace
-            autorizado e da janela selecionada.
-          </p>
+          <p>{formatComparison(intelligence.eventCount.percentageDelta, intelligence.eventCount.absoluteDelta, null)} em relação ao período anterior ({intelligence.eventCount.previous.toLocaleString("pt-BR")}).</p>
+        </article>
+
+        <article className={styles.infoCard}>
+          <p className={styles.eyebrow}>Comparação</p>
+          <h2>{formatDate(intelligence.previous.from)} — {formatDate(intelligence.previous.to)}</h2>
+          <p>O baseline usa uma janela imediatamente anterior com duração equivalente à janela atual.</p>
         </article>
 
         <article className={styles.infoCard}>
@@ -244,29 +184,17 @@ function CommandCenterDashboard({
               <h2>{snapshot.latestImport.status}</h2>
               <p>{formatDate(snapshot.latestImport.createdAt)}</p>
               <div className={styles.importStats}>
-                <div>
-                  <span className={styles.context}>Aceitas</span>
-                  <strong>{snapshot.latestImport.acceptedCount}</strong>
-                </div>
-                <div>
-                  <span className={styles.context}>Rejeitadas</span>
-                  <strong>{snapshot.latestImport.rejectedCount}</strong>
-                </div>
+                <div><span className={styles.context}>Aceitas</span><strong>{snapshot.latestImport.acceptedCount}</strong></div>
+                <div><span className={styles.context}>Rejeitadas</span><strong>{snapshot.latestImport.rejectedCount}</strong></div>
               </div>
             </>
           ) : (
-            <>
-              <h2>Sem importações</h2>
-              <p>Ainda não existe batch persistido para este workspace.</p>
-            </>
+            <><h2>Sem importações</h2><p>Ainda não existe batch persistido para este workspace.</p></>
           )}
         </article>
       </section>
 
-      <footer className={styles.footer}>
-        <span>Command Center · Sprint 3</span>
-        <span>Tehkné Solutions</span>
-      </footer>
+      <footer className={styles.footer}><span>Growth Intelligence · Sprint 4</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
@@ -287,74 +215,40 @@ function WorkspaceSelectionPage({
   return (
     <main className={styles.page}>
       <div className={styles.topbar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark} />
-          Tehkné Growth OS
-        </div>
+        <div className={styles.brand}><span className={styles.brandMark} />Tehkné Growth OS</div>
         <span className={styles.context}>Workspace autorizado</span>
       </div>
 
       <section className={styles.selectorCard}>
         <p className={styles.eyebrow}>Command Center</p>
         <h1 className={styles.selectorTitle}>Escolha onde operar.</h1>
-        <p className={styles.selectorCopy}>
-          A lista abaixo é derivada das suas memberships ativas e da permissão
-          <code> growth.command_center.read</code>.
-        </p>
+        <p className={styles.selectorCopy}>A lista abaixo é derivada das suas memberships ativas e da permissão <code> growth.command_center.read</code>.</p>
 
         {workspaces.length > 0 ? (
           <form className={styles.selectorForm} method="GET" action="/command-center">
-            <input
-              type="hidden"
-              name="operatorOrganizationId"
-              value={operatorOrganizationId}
-            />
+            <input type="hidden" name="operatorOrganizationId" value={operatorOrganizationId} />
             <label className={styles.field}>
               <span>Workspace</span>
               <select name="workspaceContext" required defaultValue="">
-                <option value="" disabled>
-                  Selecione um workspace
-                </option>
-                {workspaces.map((workspace) => (
-                  <option
-                    key={workspace.id}
-                    value={encodeWorkspaceContext(workspace)}
-                  >
-                    {workspace.name}
-                  </option>
-                ))}
+                <option value="" disabled>Selecione um workspace</option>
+                {workspaces.map((workspace) => <option key={workspace.id} value={encodeWorkspaceContext(workspace)}>{workspace.name}</option>)}
               </select>
             </label>
             <div className={styles.dateGrid}>
-              <label className={styles.field}>
-                <span>De</span>
-                <input type="date" name="from" defaultValue={defaults.from} required />
-              </label>
-              <label className={styles.field}>
-                <span>Até</span>
-                <input type="date" name="to" defaultValue={defaults.to} required />
-              </label>
+              <label className={styles.field}><span>De</span><input type="date" name="from" defaultValue={defaults.from} required /></label>
+              <label className={styles.field}><span>Até</span><input type="date" name="to" defaultValue={defaults.to} required /></label>
             </div>
-            <button className={styles.primaryButton} type="submit">
-              Abrir Command Center
-            </button>
+            <button className={styles.primaryButton} type="submit">Abrir Command Center</button>
           </form>
         ) : (
-          <div className={styles.emptyBox}>
-            Nenhum workspace ativo com permissão de leitura foi encontrado nesta
-            operadora.
-          </div>
+          <div className={styles.emptyBox}>Nenhum workspace ativo com permissão de leitura foi encontrado nesta operadora.</div>
         )}
       </section>
     </main>
   );
 }
 
-function StatePage({
-  title,
-  detail,
-  code,
-}: Readonly<{ title: string; detail: string; code: string }>) {
+function StatePage({ title, detail, code }: Readonly<{ title: string; detail: string; code: string }>) {
   return (
     <main className={styles.page}>
       <section className={styles.stateCard}>
@@ -367,16 +261,10 @@ function StatePage({
   );
 }
 
-function readContext(
-  params: Record<string, SearchValue>,
-  operatorOrganizationId: string,
-) {
+function readContext(params: Record<string, SearchValue>, operatorOrganizationId: string) {
   const encodedWorkspace = first(params.workspaceContext);
-  const decodedWorkspace = encodedWorkspace
-    ? decodeWorkspaceContext(encodedWorkspace)
-    : null;
-  const clientOrganizationId =
-    decodedWorkspace?.clientOrganizationId ?? first(params.clientOrganizationId);
+  const decodedWorkspace = encodedWorkspace ? decodeWorkspaceContext(encodedWorkspace) : null;
+  const clientOrganizationId = decodedWorkspace?.clientOrganizationId ?? first(params.clientOrganizationId);
   const workspaceId = decodedWorkspace?.workspaceId ?? first(params.workspaceId);
   const brandId = decodedWorkspace?.brandId ?? first(params.brandId);
   const fromRaw = first(params.from);
@@ -387,42 +275,24 @@ function readContext(
   const to = endOfUtcDay(toRaw);
   if (!from || !to || to < from) return null;
 
-  return {
-    operatorOrganizationId,
-    clientOrganizationId,
-    workspaceId,
-    brandId,
-    from,
-    to,
-  };
+  return { operatorOrganizationId, clientOrganizationId, workspaceId, brandId, from, to };
 }
 
-function encodeWorkspaceContext(workspace: {
-  id: string;
-  clientOrganizationId: string;
-  brandId: string | null;
-}) {
+function encodeWorkspaceContext(workspace: { id: string; clientOrganizationId: string; brandId: string | null }) {
   return [workspace.id, workspace.clientOrganizationId, workspace.brandId ?? ""].join(":");
 }
 
 function decodeWorkspaceContext(value: string) {
   const [workspaceId, clientOrganizationId, brandId = ""] = value.split(":");
   if (!workspaceId || !clientOrganizationId) return null;
-  return {
-    workspaceId,
-    clientOrganizationId,
-    brandId: brandId || undefined,
-  };
+  return { workspaceId, clientOrganizationId, brandId: brandId || undefined };
 }
 
 function defaultPeriod(from?: string, to?: string) {
   if (from && to) return { from, to };
   const today = new Date();
   const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  return {
-    from: formatInputDate(start),
-    to: formatInputDate(today),
-  };
+  return { from: formatInputDate(start), to: formatInputDate(today) };
 }
 
 function startOfUtcDay(value: string): Date | null {
@@ -448,14 +318,16 @@ function humanizeMetric(metricId: string): string {
   return metricId.replaceAll("_", " ");
 }
 
+function formatComparison(percentageDelta: number | null, absoluteDelta: number, currency: string | null): string {
+  if (percentageDelta === null) return `Novo baseline · Δ ${formatMetric(absoluteDelta, currency)}`;
+  const sign = percentageDelta > 0 ? "+" : "";
+  return `${sign}${percentageDelta.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% · Δ ${formatMetric(absoluteDelta, currency)}`;
+}
+
 function formatMetric(value: number, currency: string | null): string {
   if (currency) {
     try {
-      return new Intl.NumberFormat("pt-BR", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(value);
+      return new Intl.NumberFormat("pt-BR", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
     } catch {
       return `${value.toLocaleString("pt-BR")} ${currency}`;
     }
@@ -464,10 +336,5 @@ function formatMetric(value: number, currency: string | null): string {
 }
 
 function formatDate(value: Date): string {
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(value);
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(value);
 }
