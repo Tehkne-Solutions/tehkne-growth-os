@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 
+import { loadCommandCenterSnapshot } from "@/modules/command-center/query";
 import { authorize } from "@/modules/identity";
 import type { AuthorizationMembershipStore } from "@/modules/identity/application/contracts";
 import { parseTenantContext, type TenantContext } from "@/modules/tenancy";
 import type { DatabaseClient } from "@/shared/db/client";
 
-import { queryCommandCenterSnapshot } from "@/modules/command-center/query";
-import { loadSectorPackManifest } from "./sector-pack-loader";
 import { GROWTH_INTELLIGENCE_PERMISSIONS } from "./permissions";
+import { loadSectorPackManifest } from "./sector-pack-loader";
 import { interpretMetricMovement } from "./semantics";
 
 export type ActionEffectivenessOutcome =
@@ -87,36 +87,44 @@ export async function evaluateCompletedGrowthAction(
   if (!metric) throw new ActionEffectivenessValidationError("Metric is not declared by the action Sector Pack.");
 
   const [baseline, evaluation] = await Promise.all([
-    queryCommandCenterSnapshot(dependencies.database, {
+    loadCommandCenterSnapshot(dependencies.database, {
       workspaceId: tenant.workspaceId,
       from: input.baselineFrom,
       to: input.baselineTo,
     }),
-    queryCommandCenterSnapshot(dependencies.database, {
+    loadCommandCenterSnapshot(dependencies.database, {
       workspaceId: tenant.workspaceId,
       from: input.evaluationFrom,
       to: input.evaluationTo,
     }),
   ]);
 
-  const baselineMetric = baseline.metrics.find((item) => item.metricId === input.metricId && item.currency === (input.currency ?? null));
-  const evaluationMetric = evaluation.metrics.find((item) => item.metricId === input.metricId && item.currency === (input.currency ?? null));
+  const currency = input.currency ?? null;
+  const baselineMetric = baseline.metrics.find((item) => item.metricId === input.metricId && item.currency === currency);
+  const evaluationMetric = evaluation.metrics.find((item) => item.metricId === input.metricId && item.currency === currency);
   if (!baselineMetric || !evaluationMetric) {
     throw new ActionEffectivenessValidationError("Baseline and evaluation windows both require the selected metric.");
   }
 
   const absoluteDelta = evaluationMetric.value - baselineMetric.value;
   const percentageDelta = baselineMetric.value === 0 ? null : (absoluteDelta / Math.abs(baselineMetric.value)) * 100;
-  const interpretation = interpretMetricMovement(metric.direction, absoluteDelta);
-  const outcome: ActionEffectivenessOutcome = interpretation === "improved"
+  const interpretation = interpretMetricMovement({
+    currentValue: evaluationMetric.value,
+    previousValue: baselineMetric.value,
+    direction: metric.direction,
+  });
+  const outcome: ActionEffectivenessOutcome = interpretation.outcome === "improved"
     ? "IMPROVED"
-    : interpretation === "worsened"
+    : interpretation.outcome === "worsened"
       ? "WORSENED"
-      : interpretation === "neutral"
+      : interpretation.outcome === "neutral"
         ? "NEUTRAL"
-        : "CONTEXT_REQUIRED";
+        : interpretation.outcome === "context-required"
+          ? "CONTEXT_REQUIRED"
+          : "INSUFFICIENT_DATA";
 
   const id = randomUUID();
+  const currencyKey = currency ?? "";
   const rows = await dependencies.database.$queryRaw<ActionEffectivenessRecord[]>`
     INSERT INTO growth_action_outcomes (
       id, workspace_id, action_item_id, metric_id, currency,
@@ -125,7 +133,7 @@ export async function evaluateCompletedGrowthAction(
       outcome, recorded_by_user_id
     ) VALUES (
       ${id}::uuid, ${tenant.workspaceId}::uuid, ${input.actionItemId}::uuid,
-      ${input.metricId}, ${input.currency ?? null},
+      ${input.metricId}, ${currencyKey},
       ${input.baselineFrom}, ${input.baselineTo}, ${input.evaluationFrom}, ${input.evaluationTo},
       ${baselineMetric.value}, ${evaluationMetric.value}, ${absoluteDelta}, ${percentageDelta},
       ${outcome}, ${input.userId}::uuid
@@ -145,7 +153,7 @@ export async function evaluateCompletedGrowthAction(
       workspace_id AS "workspaceId",
       action_item_id AS "actionItemId",
       metric_id AS "metricId",
-      currency,
+      NULLIF(currency, '') AS currency,
       baseline_from AS "baselineFrom",
       baseline_to AS "baselineTo",
       evaluation_from AS "evaluationFrom",
@@ -172,7 +180,7 @@ export async function evaluateCompletedGrowthAction(
       resourceId: input.actionItemId,
       metadata: {
         metricId: input.metricId,
-        currency: input.currency ?? null,
+        currency,
         baselineFrom: input.baselineFrom.toISOString(),
         baselineTo: input.baselineTo.toISOString(),
         evaluationFrom: input.evaluationFrom.toISOString(),
@@ -200,7 +208,7 @@ export async function listActionEffectiveness(
       workspace_id AS "workspaceId",
       action_item_id AS "actionItemId",
       metric_id AS "metricId",
-      currency,
+      NULLIF(currency, '') AS currency,
       baseline_from AS "baselineFrom",
       baseline_to AS "baselineTo",
       evaluation_from AS "evaluationFrom",
