@@ -1,0 +1,22 @@
+{
+  "id": "education",
+  "version": "1.0.0",
+  "name": "Education",
+  "status": "active",
+  "funnels": [
+    {
+      "id": "enrollment",
+      "name": "Matrícula",
+      "stages": ["visitor", "lead", "application", "enrollment", "activated_student"]
+    }
+  ],
+  "metrics": [
+    {"id": "leads", "name": "Leads", "unit": "count", "direction": "up"},
+    {"id": "applications", "name": "Inscrições", "unit": "count", "direction": "up"},
+    {"id": "enrollments", "name": "Matrículas", "unit": "count", "direction": "up"},
+    {"id": "cpl", "name": "Custo por lead", "unit": "currency", "direction": "down"},
+    {"id": "cac", "name": "Custo de aquisição", "unit": "currency", "direction": "down"},
+    {"id": "activation_rate", "name": "Taxa de ativação", "unit": "percentage", "direction": "up"}
+  ],
+  "events": ["lead_created", "application_started", "application_completed", "enrollment_created", "student_activated", "media_spend_recorded"]
+}

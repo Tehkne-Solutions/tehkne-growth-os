@@ -6,18 +6,23 @@ Plataforma multiempresa de Growth Operations para aquisição, marketing, dados 
 
 ## Estado
 
-Sprint 1 — Foundation. Este incremento cobre:
+Sprint 1 — Foundation concluída e integrada à `main`.
 
-- `FND-01`: repositório local preparado em `main`; criação do remoto privado pendente;
-- `FND-02`: scaffold Next.js App Router e monólito modular;
-- `FND-03`: TypeScript estrito, lint, testes, formatação, build e CI;
-- `FND-04`: schema `operadora → cliente → marca → workspace` e auditoria;
-- `FND-05`: credenciais seguras e autenticação server-side;
-- `FND-06`: sessões persistidas, expiradas e revogáveis;
-- `FND-07`: convites de uso único, escopados e transacionais;
-- `FND-08`: RBAC hierárquico, auditoria de negações e bloqueio de escalada por papel.
+Sprint 2 — Growth Data Core em andamento:
 
-Ainda não existem conexões com contas reais, campanhas, métricas de clientes ou automações financeiras.
+- `GDC-01`: Sector Pack Registry declarativo e versionado;
+- `GDC-02`: contratos de funnels, metrics e events;
+- `GDC-03`: importação CSV canônica;
+- `GDC-04`: persistência de eventos e métricas;
+- `GDC-05`: Command Center inicial.
+
+A fundação já cobre scaffold Next.js, TypeScript estrito, CI, PostgreSQL/Prisma, tenancy `operadora → cliente → marca → workspace`, autenticação, sessões, convites e RBAC hierárquico.
+
+Ainda não existem conexões com contas reais, campanhas, métricas de clientes ou automações financeiras. Conectores de mídia paga permanecem somente leitura no MVP.
+
+## Sector Packs
+
+O Core usa packs setoriais para declarar funis, métricas e eventos sem acoplar regras de cliente ao runtime. Os primeiros packs controlados são `growth-services`, `education` e `creative-services`.
 
 ## Requisitos
 

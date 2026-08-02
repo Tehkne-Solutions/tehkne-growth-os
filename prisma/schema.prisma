@@ -41,6 +41,12 @@ enum InvitationStatus {
   EXPIRED
 }
 
+enum MetricImportStatus {
+  PREVIEWED
+  COMMITTED
+  REJECTED
+}
+
 model OperatorOrganization {
   id          String       @id @default(uuid()) @db.Uuid
   slug        String       @unique @db.VarChar(80)
@@ -62,17 +68,17 @@ model OperatorOrganization {
 }
 
 model ClientOrganization {
-  id                     String                 @id @default(uuid()) @db.Uuid
-  operatorOrganizationId String                 @map("operator_organization_id") @db.Uuid
-  slug                   String                 @db.VarChar(80)
-  name                   String                 @db.VarChar(160)
-  legalName              String?                @map("legal_name") @db.VarChar(200)
-  status                 RecordStatus           @default(ACTIVE)
-  locale                 String                 @default("pt-BR") @db.VarChar(20)
-  currency               String?                @default("BRL") @db.Char(3)
-  timezone               String                 @default("America/Sao_Paulo") @db.VarChar(80)
-  createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                     String       @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String       @map("operator_organization_id") @db.Uuid
+  slug                   String       @db.VarChar(80)
+  name                   String       @db.VarChar(160)
+  legalName              String?      @map("legal_name") @db.VarChar(200)
+  status                 RecordStatus @default(ACTIVE)
+  locale                 String       @default("pt-BR") @db.VarChar(20)
+  currency               String?      @default("BRL") @db.Char(3)
+  timezone               String       @default("America/Sao_Paulo") @db.VarChar(80)
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   operatorOrganization OperatorOrganization @relation(fields: [operatorOrganizationId], references: [id], onDelete: Restrict)
   brands               Brand[]
@@ -127,6 +133,9 @@ model Workspace {
   memberships          Membership[]
   auditEvents          AuditEvent[]
   invitations          Invitation[]
+  growthEvents         GrowthEvent[]
+  metricObservations   MetricObservation[]
+  metricImportBatches  MetricImportBatch[]
 
   @@unique([clientOrganizationId, slug])
   @@unique([id, clientOrganizationId, operatorOrganizationId])
@@ -142,23 +151,23 @@ model User {
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  memberships Membership[]
-  auditEvents AuditEvent[] @relation("AuditActor")
-  passwordCredential PasswordCredential?
-  sessions Session[]
-  invitationsSent Invitation[] @relation("InvitationInviter")
+  memberships         Membership[]
+  auditEvents         AuditEvent[] @relation("AuditActor")
+  passwordCredential  PasswordCredential?
+  sessions            Session[]
+  invitationsSent     Invitation[] @relation("InvitationInviter")
   invitationsAccepted Invitation[] @relation("InvitationAcceptor")
 
   @@map("users")
 }
 
 model Role {
-  id                     String  @id @default(uuid()) @db.Uuid
-  operatorOrganizationId String? @map("operator_organization_id") @db.Uuid
-  code                   String  @db.VarChar(80)
-  name                   String  @db.VarChar(120)
-  description            String? @db.VarChar(500)
-  isSystem               Boolean @default(false) @map("is_system")
+  id                     String   @id @default(uuid()) @db.Uuid
+  operatorOrganizationId String?  @map("operator_organization_id") @db.Uuid
+  code                   String   @db.VarChar(80)
+  name                   String   @db.VarChar(120)
+  description            String?  @db.VarChar(500)
+  isSystem               Boolean  @default(false) @map("is_system")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -264,8 +273,8 @@ model Invitation {
   clientOrganizationId   String?          @map("client_organization_id") @db.Uuid
   brandId                String?          @map("brand_id") @db.Uuid
   workspaceId            String?          @map("workspace_id") @db.Uuid
-  scope                   MembershipScope
-  status                  InvitationStatus @default(PENDING)
+  scope                  MembershipScope
+  status                 InvitationStatus @default(PENDING)
   expiresAt               DateTime         @map("expires_at") @db.Timestamptz(6)
   acceptedAt              DateTime?        @map("accepted_at") @db.Timestamptz(6)
   revokedAt               DateTime?        @map("revoked_at") @db.Timestamptz(6)
@@ -311,4 +320,84 @@ model AuditEvent {
   @@index([clientOrganizationId, occurredAt])
   @@index([workspaceId, occurredAt])
   @@map("audit_events")
+}
+
+model GrowthEvent {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  sectorPackId      String   @map("sector_pack_id") @db.VarChar(80)
+  sectorPackVersion String   @map("sector_pack_version") @db.VarChar(32)
+  eventType         String   @map("event_type") @db.VarChar(120)
+  occurredAt        DateTime @map("occurred_at") @db.Timestamptz(6)
+  source            String   @db.VarChar(80)
+  externalId        String?  @map("external_id") @db.VarChar(180)
+  deduplicationKey  String   @unique @map("deduplication_key") @db.Char(64)
+  properties        Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, eventType, occurredAt])
+  @@index([workspaceId, source, occurredAt])
+  @@map("growth_events")
+}
+
+model MetricObservation {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  importBatchId String? @map("import_batch_id") @db.Uuid
+  metricId    String   @map("metric_id") @db.VarChar(120)
+  periodStart DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime @map("period_end") @db.Timestamptz(6)
+  value       Decimal  @db.Decimal(24, 8)
+  currency    String?  @db.Char(3)
+  source      String   @db.VarChar(80)
+  dimensions  Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  importBatch MetricImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, metricId, periodStart, periodEnd])
+  @@index([workspaceId, source, periodStart])
+  @@index([importBatchId])
+  @@map("metric_observations")
+}
+
+model MetricImportBatch {
+  id                String             @id @default(uuid()) @db.Uuid
+  workspaceId       String             @map("workspace_id") @db.Uuid
+  fingerprint       String             @db.Char(64)
+  sectorPackId      String             @map("sector_pack_id") @db.VarChar(80)
+  sectorPackVersion String             @map("sector_pack_version") @db.VarChar(32)
+  source            String             @default("csv") @db.VarChar(80)
+  fileName          String?            @map("file_name") @db.VarChar(255)
+  status            MetricImportStatus @default(PREVIEWED)
+  acceptedCount     Int                @default(0) @map("accepted_count")
+  rejectedCount     Int                @default(0) @map("rejected_count")
+  committedAt       DateTime?          @map("committed_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace    Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  observations MetricObservation[]
+  rejections   MetricImportRejection[]
+
+  @@unique([workspaceId, fingerprint])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@map("metric_import_batches")
+}
+
+model MetricImportRejection {
+  id        String   @id @default(uuid()) @db.Uuid
+  batchId   String   @map("batch_id") @db.Uuid
+  rowNumber Int      @map("row_number")
+  reason    String   @db.VarChar(500)
+  raw       String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch MetricImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, rowNumber])
+  @@map("metric_import_rejections")
 }
