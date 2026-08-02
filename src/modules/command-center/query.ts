@@ -15,6 +15,8 @@ export type CommandCenterSnapshot = {
   latestImport: {
     id: string;
     status: string;
+    sectorPackId: string;
+    sectorPackVersion: string;
     acceptedCount: number;
     rejectedCount: number;
     createdAt: Date;
@@ -50,6 +52,8 @@ export async function loadCommandCenterSnapshot(
       select: {
         id: true,
         status: true,
+        sectorPackId: true,
+        sectorPackVersion: true,
         acceptedCount: true,
         rejectedCount: true,
         createdAt: true,
