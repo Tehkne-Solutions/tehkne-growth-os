@@ -23,9 +23,7 @@ export type CanonicalCampaignPerformance = Readonly<{
   spend: number;
   impressions: number;
   clicks: number;
-  ctr: number;
-  cpc: number;
-  conversions: number;
+  conversions?: number;
 }>;
 
 export type CanonicalMetricObservationInput = Readonly<{
@@ -52,14 +50,16 @@ export function expandCampaignPerformanceToMetricObservations(
     campaign_id: record.campaignId,
     campaign_name: record.campaignName,
   } as const;
-  const values: readonly [CanonicalPaidMediaMetricId, number, boolean][] = [
+  const ctr = record.impressions > 0 ? (record.clicks / record.impressions) * 100 : 0;
+  const cpc = record.clicks > 0 ? record.spend / record.clicks : 0;
+  const values: Array<[CanonicalPaidMediaMetricId, number, boolean]> = [
     ["spend", record.spend, true],
     ["impressions", record.impressions, false],
     ["clicks", record.clicks, false],
-    ["ctr", record.ctr, false],
-    ["cpc", record.cpc, true],
-    ["conversions", record.conversions, false],
+    ["ctr", ctr, false],
+    ["cpc", cpc, true],
   ];
+  if (typeof record.conversions === "number") values.push(["conversions", record.conversions, false]);
 
   return values.map(([metricId, value, monetary]) => ({
     workspaceId,
