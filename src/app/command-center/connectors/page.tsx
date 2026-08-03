@@ -69,7 +69,7 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
                 <h2>{connection.displayName}</h2>
                 <span>{connection.externalAccountId}</span>
               </div>
-              <span className={styles.badge} data-status={health.status}>{health.status}</span>
+              <span className={styles.badge} data-status={health.freshness}>{health.freshness}</span>
             </div>
             <dl className={styles.stats}>
               <div><dt>Status</dt><dd>{connection.status}</dd></div>
@@ -79,6 +79,7 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
               <div><dt>Falhas consecutivas</dt><dd>{connection.checkpoint?.consecutiveFailures ?? 0}</dd></div>
               <div><dt>Freshness</dt><dd>{health.ageMinutes === null ? "—" : `${health.ageMinutes} min`}</dd></div>
             </dl>
+            <p className={styles.reason}>{health.reason}</p>
             {connection.status === "ACTIVE" ? <ManualSyncButton tenant={tenant} connectionId={connection.id} /> : null}
           </article>
         ))}
@@ -97,7 +98,7 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
                   <td>{run.recordsRead}</td>
                   <td>{run.recordsWritten}</td>
                   <td>{run.recordsDeduplicated}</td>
-                  <td>{run.errorCode ?? "—"}</td>
+                  <td title={run.errorMessage ?? undefined}>{run.errorCode ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
