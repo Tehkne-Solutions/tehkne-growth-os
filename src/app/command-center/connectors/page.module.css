@@ -140,20 +140,20 @@
   overflow-x: auto;
 }
 
-table {
+.tableWrap table {
   width: 100%;
   border-collapse: collapse;
 }
 
-th,
-td {
+.tableWrap th,
+.tableWrap td {
   padding: 12px 10px;
   border-bottom: 1px solid #eef0f3;
   text-align: left;
   white-space: nowrap;
 }
 
-th {
+.tableWrap th {
   font-size: 12px;
   color: #6b7280;
 }
