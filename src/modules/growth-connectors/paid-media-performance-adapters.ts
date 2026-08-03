@@ -1,4 +1,5 @@
 import { parseTokenBundle, ProviderAccessVerificationError } from "./provider-adapters";
+import { ProviderHttpError } from "./operations-policy";
 import type { CanonicalCampaignPerformance } from "./performance-normalization";
 import type { SecretProvider } from "./secret-provider";
 
@@ -52,7 +53,7 @@ export class GoogleAdsPerformanceReader implements PaidMediaPerformanceReader {
         body: JSON.stringify({ query }),
       },
     );
-    if (!response.ok) throw new ProviderAccessVerificationError(`Google Ads performance query failed with HTTP ${response.status}.`);
+    if (!response.ok) throw providerHttpError("Google Ads performance query", response);
     const chunks = await response.json() as Array<{ results?: GoogleAdsRow[] }>;
     return chunks.flatMap((chunk) => chunk.results ?? []).map((row) => ({
       provider: "GOOGLE_ADS" as const,
@@ -99,7 +100,7 @@ export class MetaAdsPerformanceReader implements PaidMediaPerformanceReader {
       const response = await (this.options.fetcher ?? fetch)(nextUrl, {
         headers: { authorization: `Bearer ${token}`, accept: "application/json" },
       });
-      if (!response.ok) throw new ProviderAccessVerificationError(`Meta Ads insights query failed with HTTP ${response.status}.`);
+      if (!response.ok) throw providerHttpError("Meta Ads insights query", response);
       const body = await response.json() as { data?: MetaInsightsRow[]; paging?: { next?: string } };
       rows.push(...(body.data ?? []));
       nextUrl = body.paging?.next ?? null;
@@ -133,6 +134,23 @@ async function requireAccessToken(secrets: SecretProvider, tokenSecretRef: strin
   const bundle = parseTokenBundle(await secrets.get(tokenSecretRef));
   if (!bundle?.accessToken) throw new ProviderAccessVerificationError(`${provider} access token is unavailable.`);
   return bundle.accessToken;
+}
+
+function providerHttpError(operation: string, response: Response): ProviderHttpError {
+  return new ProviderHttpError(
+    `${operation} failed with HTTP ${response.status}.`,
+    response.status,
+    parseRetryAfterMs(response.headers.get("retry-after")),
+  );
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) return null;
+  return Math.max(0, date - Date.now());
 }
 
 function microsToUnit(value: string | number | undefined): number {
