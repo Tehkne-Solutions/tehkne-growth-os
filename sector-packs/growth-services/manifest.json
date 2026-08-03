@@ -14,9 +14,29 @@
     {"id": "impressions", "name": "Impressões", "unit": "count", "direction": "up"},
     {"id": "clicks", "name": "Cliques", "unit": "count", "direction": "up"},
     {"id": "leads", "name": "Leads", "unit": "count", "direction": "up"},
+    {"id": "qualified_leads", "name": "Leads qualificados", "unit": "count", "direction": "up"},
+    {"id": "opportunities", "name": "Oportunidades", "unit": "count", "direction": "up"},
+    {"id": "won_deals", "name": "Vendas ganhas", "unit": "count", "direction": "up"},
     {"id": "spend", "name": "Investimento", "unit": "currency", "direction": "contextual"},
+    {"id": "revenue", "name": "Receita", "unit": "currency", "direction": "up"},
     {"id": "cpl", "name": "Custo por lead", "unit": "currency", "direction": "down"},
+    {"id": "cpa", "name": "Custo por aquisição", "unit": "currency", "direction": "down"},
+    {"id": "roas", "name": "ROAS", "unit": "count", "direction": "up"},
     {"id": "conversion_rate", "name": "Taxa de conversão", "unit": "percentage", "direction": "up"}
   ],
-  "events": ["impression_recorded", "visit_recorded", "lead_created", "lead_qualified", "opportunity_created", "customer_acquired", "media_spend_recorded"]
+  "events": [
+    "impression_recorded",
+    "visit_recorded",
+    "lead_created",
+    "lead_qualified",
+    "opportunity_created",
+    "customer_acquired",
+    "media_spend_recorded",
+    "crm_lead_created",
+    "crm_lead_stage_changed",
+    "crm_opportunity_created",
+    "crm_opportunity_stage_changed",
+    "crm_opportunity_won",
+    "crm_opportunity_lost"
+  ]
 }
