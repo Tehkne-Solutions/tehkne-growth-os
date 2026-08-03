@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/connectors/scheduler",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}
