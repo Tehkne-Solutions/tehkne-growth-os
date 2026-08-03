@@ -5,6 +5,7 @@ import type { SecretProvider } from "@/modules/growth-connectors/secret-provider
 import type { DatabaseClient } from "@/shared/db/client";
 
 import { materializeFullFunnelMetrics } from "./full-funnel-metrics";
+import { HubSpotCrmAdapter } from "./hubspot-adapter";
 import { resolveHubSpotDealContactAssociations } from "./hubspot-associations";
 import { syncCrmFunnel, type CrmSyncResult } from "./sync-service";
 import type { CrmConnection, CrmProvider, ReadOnlyCrmAdapter } from "./types";
@@ -46,6 +47,7 @@ export async function listDueCrmConnections(
       display_name AS "displayName",
       status,
       secret_ref AS "secretRef",
+      settings,
       cursor,
       watermark,
       last_success_at AS "lastSuccessAt",
@@ -94,6 +96,12 @@ export async function runDueCrmSyncs(dependencies: Readonly<{
         now,
       });
       const sectorPack = await dependencies.resolveSectorPack(connection.workspaceId);
+      const adapter = connection.provider === "HUBSPOT"
+        ? new HubSpotCrmAdapter({
+            ...(dependencies.fetchImpl ? { fetchImpl: dependencies.fetchImpl } : {}),
+            ...(connection.settings?.attributionProperties ? { attributionProperties: connection.settings.attributionProperties } : {}),
+          })
+        : dependencies.resolveAdapter(connection.provider);
       const sync = await withConnectorRetry(
         async (attempt) => {
           attempts = attempt;
@@ -101,7 +109,7 @@ export async function runDueCrmSyncs(dependencies: Readonly<{
             {
               database: dependencies.database,
               secrets: dependencies.secrets,
-              adapter: dependencies.resolveAdapter(connection.provider),
+              adapter,
             },
             {
               connection,

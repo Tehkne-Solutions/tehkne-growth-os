@@ -8,11 +8,18 @@ import {
   validateSession,
 } from "@/modules/identity";
 import { getSessionCookieName } from "@/modules/identity/http/security";
+import { PostgresEncryptedSecretProvider } from "@/modules/growth-connectors/secret-provider";
 import { loadUnifiedOnboardingReadiness } from "@/modules/growth-onboarding/connection-readiness";
+import {
+  guidedActivationEnvironmentFromProcess,
+  loadPendingPaidMediaActivation,
+  type PendingPaidMediaActivation,
+} from "@/modules/growth-onboarding/guided-activation";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
 
+import { HubSpotActivationForm, PaidMediaActivationControls } from "./activation-controls";
 import styles from "./page.module.css";
 
 type SearchValue = string | string[] | undefined;
@@ -24,10 +31,18 @@ type State =
   | { kind: "authentication-required" }
   | { kind: "forbidden" }
   | { kind: "unavailable" }
-  | { kind: "ready"; tenant: Tenant; readiness: Awaited<ReturnType<typeof loadUnifiedOnboardingReadiness>> };
+  | {
+      kind: "ready";
+      tenant: Tenant;
+      readiness: Awaited<ReturnType<typeof loadUnifiedOnboardingReadiness>>;
+      canManagePaid: boolean;
+      canManageCrm: boolean;
+      pending: PendingPaidMediaActivation | null;
+    };
 
 export default async function UnifiedSetupPage({ searchParams }: PageProps) {
-  const state = await resolveState(await searchParams);
+  const params = await searchParams;
+  const state = await resolveState(params);
   if (state.kind !== "ready") {
     const labels = {
       "context-required": ["Contexto necessário", "Abra o Setup a partir de um workspace válido."],
@@ -41,16 +56,20 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
 
   const { tenant, readiness } = state;
   const connectorsHref = href("/command-center/connectors", tenant);
+  const setupHref = href("/command-center/setup", tenant);
+  const activationError = first(params.activationError);
   return (
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Unified Setup · INT-37</p>
-          <h1>Conecte mídia e CRM com readiness explícito.</h1>
-          <p>O setup não expõe tokens. Ele valida infraestrutura, detecta conexões reais e conduz para a operação segura já existente.</p>
+          <p className={styles.eyebrow}>Guided Provider Activation · INT-38</p>
+          <h1>Conectar, verificar, selecionar e ativar sem sair do fluxo.</h1>
+          <p>Google e Meta usam OAuth com PKCE e seleção explícita de conta. HubSpot é testado em modo read-only antes de entrar como conexão ACTIVE.</p>
         </div>
         <div className={styles.progress}><strong>{readiness.completionPercent}%</strong><span>{readiness.connectedProviders}/{readiness.totalProviders} providers conectados</span></div>
       </header>
+
+      {activationError ? <p className={styles.formError} role="alert">Falha no retorno OAuth: {activationError}</p> : null}
 
       <section className={styles.summary} aria-label="Readiness geral">
         <article><span>Produção</span><strong>{readiness.productionReady ? "Ready" : "Configuração pendente"}</strong></article>
@@ -74,23 +93,32 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
               <div className={styles.missing}><strong>Falta configurar</strong><ul>{provider.missing.map((item) => <li key={item}>{item}</li>)}</ul></div>
             ) : <p className={styles.ready}>Infraestrutura segura disponível.</p>}
             <div className={styles.next}><span>Próximo passo</span><strong>{provider.nextAction}</strong></div>
-            <a href={connectorsHref}>{provider.activeConnectionCount > 0 ? "Abrir operações" : "Continuar configuração"}</a>
+            <a href={connectorsHref}>{provider.activeConnectionCount > 0 ? "Abrir operações" : "Ver diagnóstico"}</a>
           </article>
         ))}
       </section>
+
+      <PaidMediaActivationControls
+        tenant={tenant}
+        returnTo={setupHref}
+        canManage={state.canManagePaid}
+        pending={state.pending}
+      />
+
+      <HubSpotActivationForm tenant={tenant} canManage={state.canManageCrm} />
 
       <section className={styles.checklist}>
         <div><p className={styles.eyebrow}>Activation Checklist</p><h2>Critério mínimo para produção</h2></div>
         <ol>
           <li>Vault criptografado e referências de credencial configuradas.</li>
-          <li>Conta Google Ads ou Meta Ads selecionada e conexão ACTIVE.</li>
-          <li>HubSpot conectado com propriedades de atribuição mapeadas no adapter/runtime.</li>
-          <li>Primeira sincronização concluída sem erro e freshness diferente de unavailable.</li>
-          <li>Command Center recebendo mídia, funil e atribuição para o mesmo workspace.</li>
+          <li>OAuth concluído e conta Google Ads/Meta Ads escolhida explicitamente.</li>
+          <li>HubSpot validado em leitura com Portal ID e mapa de propriedades de atribuição.</li>
+          <li>Conexão ACTIVE com primeira sincronização concluída sem erro.</li>
+          <li>Freshness operacional e dados de mídia, funil e atribuição no mesmo workspace.</li>
         </ol>
       </section>
 
-      <footer className={styles.footer}><span>Unified Onboarding · INT-37</span><span>Tehkné Solutions</span></footer>
+      <footer className={styles.footer}><span>Guided Provider Activation · INT-38</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
@@ -100,6 +128,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
   const clientOrganizationId = first(params.clientOrganizationId);
   const workspaceId = first(params.workspaceId);
   const brandId = first(params.brandId);
+  const oauthAttemptId = first(params.oauthAttemptId);
   if (!operatorOrganizationId || !clientOrganizationId || !workspaceId) return { kind: "context-required" };
   try {
     const environment = parseServerEnvironment(process.env);
@@ -112,12 +141,53 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
     const session = await validateSession(repository, token, secret);
     const tenant = parseTenantContext({ operatorOrganizationId, clientOrganizationId, workspaceId, ...(brandId ? { brandId } : {}) });
     await authorize(repository, { userId: session.userId, tenant, permission: "growth.command_center.read" });
+    const canManagePaid = await hasPermission(repository, session.userId, tenant, "growth.connectors.manage");
+    const canManageCrm = await hasPermission(repository, session.userId, tenant, "growth.crm.manage");
     const readiness = await loadUnifiedOnboardingReadiness(database, workspaceId, process.env);
-    return { kind: "ready", tenant: brandId ? { operatorOrganizationId, clientOrganizationId, workspaceId, brandId } : { operatorOrganizationId, clientOrganizationId, workspaceId }, readiness };
+    let pending: PendingPaidMediaActivation | null = null;
+    if (oauthAttemptId && canManagePaid && process.env.CONNECTOR_SECRET_MASTER_KEY) {
+      try {
+        const secrets = new PostgresEncryptedSecretProvider(database, process.env.CONNECTOR_SECRET_MASTER_KEY);
+        pending = await loadPendingPaidMediaActivation(
+          { database, secrets },
+          {
+            userId: session.userId,
+            workspaceId,
+            attemptId: oauthAttemptId,
+            environment: guidedActivationEnvironmentFromProcess(process.env),
+          },
+        );
+      } catch {
+        pending = null;
+      }
+    }
+    return {
+      kind: "ready",
+      tenant: brandId ? { operatorOrganizationId, clientOrganizationId, workspaceId, brandId } : { operatorOrganizationId, clientOrganizationId, workspaceId },
+      readiness,
+      canManagePaid,
+      canManageCrm,
+      pending,
+    };
   } catch (error) {
     if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
     if (error instanceof AuthorizationDeniedError) return { kind: "forbidden" };
     return { kind: "unavailable" };
+  }
+}
+
+async function hasPermission(
+  repository: PrismaIdentityRepository,
+  userId: string,
+  tenant: ReturnType<typeof parseTenantContext>,
+  permission: string,
+): Promise<boolean> {
+  try {
+    await authorize(repository, { userId, tenant, permission });
+    return true;
+  } catch (error) {
+    if (error instanceof AuthorizationDeniedError) return false;
+    throw error;
   }
 }
 
