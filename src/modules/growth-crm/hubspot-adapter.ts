@@ -4,21 +4,11 @@ import type {
   CanonicalCrmLead,
   CanonicalCrmOpportunity,
   CrmReadPage,
+  HubSpotAttributionPropertyMap,
   ReadOnlyCrmAdapter,
 } from "./types";
 
 export class HubSpotCrmReadError extends Error {}
-
-type AttributionPropertyMap = Readonly<{
-  gclid?: string;
-  gbraid?: string;
-  wbraid?: string;
-  fbclid?: string;
-  utmCampaign?: string;
-  utmSource?: string;
-  googleCampaignId?: string;
-  metaCampaignId?: string;
-}>;
 
 export class HubSpotCrmAdapter implements ReadOnlyCrmAdapter {
   readonly provider = "HUBSPOT" as const;
@@ -28,7 +18,7 @@ export class HubSpotCrmAdapter implements ReadOnlyCrmAdapter {
       apiBaseUrl?: string;
       apiPath?: string;
       fetchImpl?: typeof fetch;
-      attributionProperties?: AttributionPropertyMap;
+      attributionProperties?: HubSpotAttributionPropertyMap;
     }> = {},
   ) {}
 
@@ -104,7 +94,7 @@ type HubSpotSearchResponse = Readonly<{
   paging?: Readonly<{ next?: Readonly<{ after?: string }> }>;
 }>;
 
-function mapContact(object: HubSpotObject, attributionMap?: AttributionPropertyMap): CanonicalCrmLead {
+function mapContact(object: HubSpotObject, attributionMap?: HubSpotAttributionPropertyMap): CanonicalCrmLead {
   const properties = object.properties ?? {};
   const email = properties.email;
   const phone = properties.phone;
@@ -122,7 +112,7 @@ function mapContact(object: HubSpotObject, attributionMap?: AttributionPropertyM
 
 function collectAttributionEvidence(
   properties: Readonly<Record<string, string | null>>,
-  map?: AttributionPropertyMap,
+  map?: HubSpotAttributionPropertyMap,
 ): CanonicalCrmAttributionEvidence[] {
   if (!map) return [];
   const evidence: CanonicalCrmAttributionEvidence[] = [];
