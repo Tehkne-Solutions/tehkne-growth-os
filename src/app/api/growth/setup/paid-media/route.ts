@@ -85,13 +85,18 @@ export async function POST(request: Request) {
       tenant,
       permission: "growth.connectors.manage",
     });
+    const account = {
+      externalAccountId: body.account.externalAccountId,
+      displayName: body.account.displayName,
+      ...(body.account.managerAccountId ? { managerAccountId: body.account.managerAccountId } : {}),
+    };
     const result = await activatePendingPaidMediaAccount(
       { database, secrets },
       {
         userId: session.userId,
         workspaceId: body.tenant.workspaceId,
         attemptId: body.attemptId,
-        account: body.account,
+        account,
         environment: activationEnvironment,
       },
     );
