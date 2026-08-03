@@ -16,6 +16,7 @@ export function CommandCenterNav() {
       <a className={styles.link} data-active={pathname === "/command-center/action-workspace"} href={`/command-center/action-workspace${suffix}`}>Action Workspace</a>
       <a className={styles.link} data-active={pathname === "/command-center/attribution"} href={`/command-center/attribution${suffix}`}>Attribution</a>
       <a className={styles.link} data-active={pathname === "/command-center/connectors"} href={`/command-center/connectors${suffix}`}>Connectors</a>
+      <a className={styles.link} data-active={pathname === "/command-center/setup"} href={`/command-center/setup${suffix}`}>Setup</a>
     </nav>
   );
 }
