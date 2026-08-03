@@ -2,6 +2,14 @@ export type CrmProvider = "HUBSPOT";
 export type CrmConnectionStatus = "ACTIVE" | "PAUSED" | "ERROR" | "DISCONNECTED";
 export type CrmOpportunityStatus = "OPEN" | "WON" | "LOST";
 
+export type CanonicalCrmAttributionEvidence = Readonly<{
+  type: "CLICK_ID" | "EXPLICIT_CAMPAIGN_ID" | "UTM_CAMPAIGN_ID";
+  value: string;
+  provider: "GOOGLE_ADS" | "META_ADS" | "UNKNOWN";
+  externalAccountId?: string;
+  campaignId?: string;
+}>;
+
 export type CrmConnection = Readonly<{
   id: string;
   workspaceId: string;
@@ -24,6 +32,7 @@ export type CanonicalCrmLead = Readonly<{
   lifecycleStage: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  attributionEvidence: readonly CanonicalCrmAttributionEvidence[];
   properties: Readonly<Record<string, string | number | boolean | null>>;
 }>;
 
