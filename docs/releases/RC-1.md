@@ -33,7 +33,7 @@ Never commit these values.
 
 ## Vercel RC deployment
 
-The manual GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It installs the Vercel CLI, links the repository non-interactively, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment.
+The manual GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment.
 
 Required GitHub Actions secrets:
 
