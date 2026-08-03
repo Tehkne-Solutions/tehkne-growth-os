@@ -1,4 +1,5 @@
 import type { SectorPackManifest } from "@/modules/sector-packs/types";
+import { materializeAttributedCampaignRevenue } from "@/modules/growth-attribution/capture";
 import { withConnectorRetry, type ConnectorRetryPolicy } from "@/modules/growth-connectors/operations-policy";
 import type { SecretProvider } from "@/modules/growth-connectors/secret-provider";
 import type { DatabaseClient } from "@/shared/db/client";
@@ -26,6 +27,7 @@ export type ScheduledCrmResult = Readonly<{
   sync: CrmSyncResult | null;
   associationsLinked: number;
   metricsWritten: number;
+  attributionCampaigns: number;
   error: string | null;
 }>;
 
@@ -142,6 +144,11 @@ export async function runDueCrmSyncs(dependencies: Readonly<{
         currency,
         qualifiedStages,
       });
+      const attribution = await materializeAttributedCampaignRevenue(dependencies.database, {
+        workspaceId: connection.workspaceId,
+        from: periodStart,
+        to: now,
+      });
 
       results.push({
         connectionId: connection.id,
@@ -152,6 +159,7 @@ export async function runDueCrmSyncs(dependencies: Readonly<{
         sync,
         associationsLinked,
         metricsWritten: metrics.written,
+        attributionCampaigns: attribution.campaigns,
         error: null,
       });
     } catch (error) {
@@ -164,6 +172,7 @@ export async function runDueCrmSyncs(dependencies: Readonly<{
         sync: null,
         associationsLinked: 0,
         metricsWritten: 0,
+        attributionCampaigns: 0,
         error: error instanceof Error ? error.message : "Unknown CRM scheduler error",
       });
     }

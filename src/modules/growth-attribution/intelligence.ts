@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import { authorize } from "@/modules/identity";
 import type { AuthorizationMembershipStore } from "@/modules/identity/application/contracts";
 import { parseTenantContext, type TenantContext } from "@/modules/tenancy";
 import type { DatabaseClient } from "@/shared/db/client";
 
-import { loadAttributionCoverage } from "./capture";
+import { loadAttributionCoverage, materializeAttributedCampaignRevenue } from "./capture";
 
 export const ATTRIBUTION_REVIEW_PERMISSION = "growth.attribution.review" as const;
 
@@ -19,6 +21,9 @@ export type AttributionCampaignIntelligence = Readonly<{
   attributedRoas: number | null;
   confidenceHighCount: number;
   confidenceMediumCount: number;
+  statusObservedCount: number;
+  statusConfirmedCount: number;
+  statusRejectedCount: number;
   calculatedAt: Date;
 }>;
 
@@ -67,6 +72,9 @@ export async function loadAttributionIntelligence(
         attributed_roas::double precision AS "attributedRoas",
         confidence_high_count AS "confidenceHighCount",
         confidence_medium_count AS "confidenceMediumCount",
+        status_observed_count AS "statusObservedCount",
+        status_confirmed_count AS "statusConfirmedCount",
+        status_rejected_count AS "statusRejectedCount",
         calculated_at AS "calculatedAt"
       FROM growth_attribution_campaign_metrics
       WHERE workspace_id = ${input.workspaceId}::uuid
@@ -100,9 +108,7 @@ export async function loadAttributionIntelligence(
         AND a.campaign_id IS NOT NULL
         AND a.observed_at BETWEEN ${input.from} AND ${input.to}
       GROUP BY a.id
-      ORDER BY
-        CASE a.confidence WHEN 'MEDIUM' THEN 0 ELSE 1 END,
-        a.observed_at DESC
+      ORDER BY CASE a.confidence WHEN 'MEDIUM' THEN 0 ELSE 1 END, a.observed_at DESC
       LIMIT 100
     `,
   ]);
@@ -117,9 +123,12 @@ export async function reviewAttributionLink(
     tenant: TenantContext;
     attributionLinkId: string;
     decision: "CONFIRMED" | "REJECTED";
+    from: Date;
+    to: Date;
   }>,
 ): Promise<AttributionReviewItem> {
   const tenant = requireWorkspace(input.tenant);
+  if (input.to < input.from) throw new AttributionReviewValidationError("Attribution review period is invalid.");
   await authorize(dependencies.authorizationStore, {
     userId: input.userId,
     tenant,
@@ -139,23 +148,23 @@ export async function reviewAttributionLink(
       AND workspace_id = ${tenant.workspaceId}::uuid
       AND status = 'OBSERVED'
     RETURNING
-      id,
-      subject_type AS "subjectType",
-      subject_id AS "subjectId",
-      provider,
-      external_account_id AS "externalAccountId",
-      campaign_id AS "campaignId",
-      evidence_type AS "evidenceType",
-      confidence,
-      status,
-      observed_at AS "observedAt",
-      0::int AS "opportunityCount",
-      0::int AS "wonOpportunityCount",
-      0::double precision AS "wonRevenue",
-      NULL::text AS currency
+      id, subject_type AS "subjectType", subject_id AS "subjectId", provider,
+      external_account_id AS "externalAccountId", campaign_id AS "campaignId",
+      evidence_type AS "evidenceType", confidence, status, observed_at AS "observedAt",
+      0::int AS "opportunityCount", 0::int AS "wonOpportunityCount",
+      0::double precision AS "wonRevenue", NULL::text AS currency
   `;
   const updated = rows[0];
   if (!updated) throw new AttributionReviewNotFoundError("Attribution link disappeared during review.");
+
+  if (input.decision === "CONFIRMED" && existing.subjectType === "LEAD") {
+    await propagateConfirmedLeadAttribution(dependencies.database, tenant.workspaceId, existing);
+  }
+  await materializeAttributedCampaignRevenue(dependencies.database, {
+    workspaceId: tenant.workspaceId,
+    from: input.from,
+    to: input.to,
+  });
 
   await dependencies.database.auditEvent.create({
     data: {
@@ -172,6 +181,8 @@ export async function reviewAttributionLink(
         confidence: updated.confidence,
         provider: updated.provider,
         campaignId: updated.campaignId ?? "",
+        opportunityPropagation: input.decision === "CONFIRMED" && existing.subjectType === "LEAD" ? "enabled" : "not_applicable",
+        rematerialized: "true",
       },
     },
   });
@@ -179,9 +190,50 @@ export async function reviewAttributionLink(
   return updated;
 }
 
-async function findAttributionLink(database: DatabaseClient, workspaceId: string, id: string) {
-  const rows = await database.$queryRaw<Array<{ status: string }>>`
-    SELECT status
+type StoredAttributionLink = Readonly<{
+  id: string;
+  status: "OBSERVED" | "CONFIRMED" | "REJECTED";
+  subjectType: "LEAD" | "OPPORTUNITY";
+  subjectId: string;
+  provider: string;
+  externalAccountId: string | null;
+  campaignId: string | null;
+  evidenceType: string;
+  evidenceHash: string;
+  confidence: "HIGH" | "MEDIUM";
+  observedAt: Date;
+}>;
+
+async function propagateConfirmedLeadAttribution(
+  database: DatabaseClient,
+  workspaceId: string,
+  source: StoredAttributionLink,
+): Promise<number> {
+  if (!source.campaignId) return 0;
+  return database.$executeRaw`
+    INSERT INTO growth_attribution_links (
+      id, workspace_id, subject_type, subject_id, provider, external_account_id,
+      campaign_id, evidence_type, evidence_hash, confidence, status, observed_at
+    )
+    SELECT
+      gen_random_uuid(), ${workspaceId}::uuid, 'OPPORTUNITY', o.id,
+      ${source.provider}, ${source.externalAccountId}, ${source.campaignId},
+      ${source.evidenceType}, ${source.evidenceHash}, ${source.confidence}, 'CONFIRMED', ${source.observedAt}
+    FROM growth_crm_opportunities o
+    WHERE o.workspace_id = ${workspaceId}::uuid
+      AND o.primary_lead_id = ${source.subjectId}::uuid
+    ON CONFLICT (workspace_id, subject_type, subject_id, evidence_type, evidence_hash)
+    DO UPDATE SET status = 'CONFIRMED', updated_at = CURRENT_TIMESTAMP
+  `;
+}
+
+async function findAttributionLink(database: DatabaseClient, workspaceId: string, id: string): Promise<StoredAttributionLink | null> {
+  const rows = await database.$queryRaw<StoredAttributionLink[]>`
+    SELECT
+      id, status, subject_type AS "subjectType", subject_id AS "subjectId", provider,
+      external_account_id AS "externalAccountId", campaign_id AS "campaignId",
+      evidence_type AS "evidenceType", evidence_hash AS "evidenceHash",
+      confidence, observed_at AS "observedAt"
     FROM growth_attribution_links
     WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid
     LIMIT 1

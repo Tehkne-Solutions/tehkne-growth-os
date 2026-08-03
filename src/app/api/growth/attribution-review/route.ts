@@ -32,6 +32,8 @@ const requestSchema = z.object({
   tenant: tenantSchema,
   attributionLinkId: z.uuid(),
   decision: z.enum(["CONFIRMED", "REJECTED"]),
+  from: z.iso.datetime({ offset: true }),
+  to: z.iso.datetime({ offset: true }),
 }).strict();
 
 export async function POST(request: Request) {
@@ -55,6 +57,8 @@ export async function POST(request: Request) {
         tenant,
         attributionLinkId: body.attributionLinkId,
         decision: body.decision,
+        from: new Date(body.from),
+        to: new Date(body.to),
       },
     );
 

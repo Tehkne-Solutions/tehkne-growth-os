@@ -51,29 +51,32 @@ export default async function AttributionPage({ searchParams }: PageProps) {
         <div>
           <p className={styles.eyebrow}>Attribution Intelligence</p>
           <h1>Campanha → lead → oportunidade → receita, com confiança explícita.</h1>
-          <p>Atribuição usa apenas evidência observável; proximidade temporal isolada continua fora do modelo.</p>
+          <p>Atribuição usa evidência observável, separa vínculos observados/confirmados/rejeitados e nunca usa proximidade temporal isolada.</p>
         </div>
         <span>{formatDate(state.from)} — {formatDate(state.to)}</span>
       </header>
 
       <section className={styles.kpis}>
         <article><span>Cobertura</span><strong>{formatPercent(intelligence.coverage.coveragePercent)}</strong><small>{intelligence.coverage.attributedLeads} de {intelligence.coverage.totalLeads} leads</small></article>
-        <article><span>Não atribuídos</span><strong>{unattributed}</strong><small>leads sem campanha confiável</small></article>
+        <article><span>Confirmados</span><strong>{intelligence.coverage.confirmedLeads}</strong><small>leads com atribuição revisada/confirmada</small></article>
+        <article><span>Observados</span><strong>{intelligence.coverage.observedLeads}</strong><small>evidências ainda aguardando decisão</small></article>
+        <article><span>Rejeitados</span><strong>{intelligence.coverage.rejectedLeads}</strong><small>evidências explicitamente descartadas</small></article>
+        <article><span>Não atribuídos</span><strong>{unattributed}</strong><small>leads sem campanha utilizável</small></article>
         <article><span>Campanhas</span><strong>{intelligence.campaigns.length}</strong><small>com métricas atribuídas no período</small></article>
-        <article><span>Revisões</span><strong>{intelligence.reviewQueue.length}</strong><small>evidências OBSERVED aguardando decisão</small></article>
       </section>
 
       <section className={styles.section}>
         <div className={styles.sectionHeader}><div><p className={styles.eyebrow}>Campaign Revenue</p><h2>Receita e ROAS atribuídos por campanha</h2></div></div>
         <div className={styles.tableWrap}>
           <table>
-            <thead><tr><th>Provider</th><th>Campanha</th><th>Leads</th><th>Won</th><th>Receita</th><th>Spend</th><th>ROAS</th><th>Confiança</th></tr></thead>
+            <thead><tr><th>Provider</th><th>Campanha</th><th>Leads</th><th>Won</th><th>Receita</th><th>Spend</th><th>ROAS</th><th>Confiança</th><th>Status</th></tr></thead>
             <tbody>
-              {intelligence.campaigns.length === 0 ? <tr><td colSpan={8}>Nenhuma métrica atribuída materializada para esta janela.</td></tr> : intelligence.campaigns.map((campaign) => (
+              {intelligence.campaigns.length === 0 ? <tr><td colSpan={9}>Nenhuma métrica atribuída materializada para esta janela.</td></tr> : intelligence.campaigns.map((campaign) => (
                 <tr key={`${campaign.provider}:${campaign.externalAccountId ?? "none"}:${campaign.campaignId}:${campaign.currency ?? "none"}`}>
                   <td>{formatProvider(campaign.provider)}</td><td>{campaign.campaignId}</td><td>{campaign.attributedLeads}</td><td>{campaign.attributedWonDeals}</td>
                   <td>{formatMoney(campaign.attributedRevenue, campaign.currency)}</td><td>{formatMoney(campaign.mediaSpend, campaign.currency)}</td><td>{campaign.attributedRoas === null ? "—" : campaign.attributedRoas.toFixed(2)}</td>
                   <td><span className={styles.high}>H {campaign.confidenceHighCount}</span> · <span className={styles.medium}>M {campaign.confidenceMediumCount}</span></td>
+                  <td>O {campaign.statusObservedCount} · C {campaign.statusConfirmedCount} · R {campaign.statusRejectedCount}</td>
                 </tr>
               ))}
             </tbody>
@@ -91,13 +94,13 @@ export default async function AttributionPage({ searchParams }: PageProps) {
               <p>Lead ref. {shortId(item.subjectId)} · {item.opportunityCount} oportunidades · {item.wonOpportunityCount} ganhas</p>
               <p>Receita ganha relacionada: <strong>{formatMoney(item.wonRevenue, item.currency)}</strong></p>
               <small>Observada em {formatDateTime(item.observedAt)}</small>
-              {canReview ? <AttributionReviewButtons tenant={tenant} attributionLinkId={item.id} /> : null}
+              {canReview ? <AttributionReviewButtons tenant={tenant} attributionLinkId={item.id} from={state.from.toISOString()} to={state.to.toISOString()} /> : null}
             </article>
           ))}
         </div>
       </section>
 
-      <footer className={styles.footer}><span>Attribution Intelligence · INT-35</span><span>Tehkné Solutions</span></footer>
+      <footer className={styles.footer}><span>Attribution Automation · INT-36</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
