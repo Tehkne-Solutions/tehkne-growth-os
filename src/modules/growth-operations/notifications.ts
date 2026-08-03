@@ -19,6 +19,7 @@ export type OperationsNotificationCandidate = Readonly<{
 export type OperationsWebhookConfiguration = Readonly<{
   url?: string;
   bearerToken?: string;
+  maxAttempts?: number;
 }>;
 
 export type OperationsDeliveryResult = Readonly<{
@@ -27,6 +28,19 @@ export type OperationsDeliveryResult = Readonly<{
   sent: number;
   failed: number;
   deduplicated: number;
+}>;
+
+export type OperationsDeliveryHistoryItem = Readonly<{
+  id: string;
+  channel: "WEBHOOK";
+  severity: "critical" | "warning";
+  reason: string;
+  status: "PENDING" | "SENT" | "FAILED";
+  attempts: number;
+  lastError: string | null;
+  sentAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }>;
 
 export async function loadUnifiedOperationsNotificationCandidates(
@@ -105,12 +119,54 @@ export async function deliverOperationsNotifications(
     }
 
     attempted += 1;
+    const delivery = await postOperationsWebhookWithRetry(
+      url,
+      candidate,
+      now,
+      configuration.bearerToken,
+      configuration.maxAttempts ?? 3,
+      fetchImpl,
+    );
+
+    if (delivery.ok) {
+      await database.$executeRaw`
+        UPDATE growth_operations_notification_deliveries
+        SET status = 'SENT', attempts = ${delivery.attempts}, sent_at = ${now}, last_error = NULL, updated_at = NOW()
+        WHERE id = ${inserted[0].id}::uuid
+      `;
+      sent += 1;
+    } else {
+      await database.$executeRaw`
+        UPDATE growth_operations_notification_deliveries
+        SET status = 'FAILED', attempts = ${delivery.attempts},
+            last_error = ${delivery.error.slice(0, 2000)}, updated_at = NOW()
+        WHERE id = ${inserted[0].id}::uuid
+      `;
+      failed += 1;
+    }
+  }
+
+  return { configured: true, attempted, sent, failed, deduplicated };
+}
+
+export async function postOperationsWebhookWithRetry(
+  url: string,
+  candidate: OperationsNotificationCandidate,
+  now: Date,
+  bearerToken: string | undefined,
+  maxAttempts: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Readonly<{ ok: true; attempts: number } | { ok: false; attempts: number; error: string }>> {
+  const boundedAttempts = Math.max(1, Math.min(maxAttempts, 5));
+  let lastError = "unknown_webhook_error";
+
+  for (let attempt = 1; attempt <= boundedAttempts; attempt += 1) {
     try {
       const response = await fetchImpl(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(configuration.bearerToken ? { Authorization: `Bearer ${configuration.bearerToken}` } : {}),
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
         },
         body: JSON.stringify({
           event: "tehkne_growth_operations_alert",
@@ -119,26 +175,40 @@ export async function deliverOperationsNotifications(
           alert: candidate,
         }),
       });
-      if (!response.ok) throw new Error(`Operations webhook failed with HTTP ${response.status}.`);
-      await database.$executeRaw`
-        UPDATE growth_operations_notification_deliveries
-        SET status = 'SENT', attempts = attempts + 1, sent_at = ${now}, last_error = NULL, updated_at = NOW()
-        WHERE id = ${inserted[0].id}::uuid
-      `;
-      sent += 1;
+      if (response.ok) return { ok: true, attempts: attempt };
+      lastError = `Operations webhook failed with HTTP ${response.status}.`;
+      if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) break;
     } catch (error) {
-      await database.$executeRaw`
-        UPDATE growth_operations_notification_deliveries
-        SET status = 'FAILED', attempts = attempts + 1,
-            last_error = ${error instanceof Error ? error.message.slice(0, 2000) : "unknown_webhook_error"},
-            updated_at = NOW()
-        WHERE id = ${inserted[0].id}::uuid
-      `;
-      failed += 1;
+      lastError = error instanceof Error ? error.message : "unknown_webhook_error";
     }
   }
 
-  return { configured: true, attempted, sent, failed, deduplicated };
+  return { ok: false, attempts: boundedAttempts, error: lastError };
+}
+
+export async function loadOperationsDeliveryHistory(
+  database: DatabaseClient,
+  workspaceId: string,
+  limit = 50,
+): Promise<OperationsDeliveryHistoryItem[]> {
+  const boundedLimit = Math.max(1, Math.min(limit, 200));
+  return database.$queryRaw<OperationsDeliveryHistoryItem[]>`
+    SELECT
+      id,
+      channel,
+      severity,
+      reason,
+      status,
+      attempts,
+      last_error AS "lastError",
+      sent_at AS "sentAt",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+    FROM growth_operations_notification_deliveries
+    WHERE workspace_id = ${workspaceId}::uuid
+    ORDER BY created_at DESC
+    LIMIT ${boundedLimit}
+  `;
 }
 
 export function buildOperationsNotificationFingerprint(
