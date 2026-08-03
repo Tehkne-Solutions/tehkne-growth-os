@@ -15,6 +15,7 @@ import {
   loadPendingPaidMediaActivation,
   type PendingPaidMediaActivation,
 } from "@/modules/growth-onboarding/guided-activation";
+import { auditProductionReadiness } from "@/modules/growth-operations/production-readiness";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -35,6 +36,7 @@ type State =
       kind: "ready";
       tenant: Tenant;
       readiness: Awaited<ReturnType<typeof loadUnifiedOnboardingReadiness>>;
+      productionAudit: Awaited<ReturnType<typeof auditProductionReadiness>>;
       canManagePaid: boolean;
       canManageCrm: boolean;
       pending: PendingPaidMediaActivation | null;
@@ -54,7 +56,7 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
     return <main className={styles.page}><section className={styles.state}><p>Tehkné Growth OS</p><h1>{title}</h1><span>{detail}</span></section></main>;
   }
 
-  const { tenant, readiness } = state;
+  const { tenant, readiness, productionAudit } = state;
   const connectorsHref = href("/command-center/connectors", tenant);
   const setupHref = href("/command-center/setup", tenant);
   const activationError = first(params.activationError);
@@ -62,19 +64,19 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Guided Provider Activation · INT-38</p>
-          <h1>Conectar, verificar, selecionar e ativar sem sair do fluxo.</h1>
-          <p>Google e Meta usam OAuth com PKCE e seleção explícita de conta. HubSpot é testado em modo read-only antes de entrar como conexão ACTIVE.</p>
+          <p className={styles.eyebrow}>Production Readiness · INT-39</p>
+          <h1>Conectar não basta: cada integração precisa provar a primeira sincronização.</h1>
+          <p>O Setup agora separa conexão ACTIVE de conexão VERIFIED e audita automaticamente scheduler, vault, ambiente, mídia e CRM antes do rollout.</p>
         </div>
-        <div className={styles.progress}><strong>{readiness.completionPercent}%</strong><span>{readiness.connectedProviders}/{readiness.totalProviders} providers conectados</span></div>
+        <div className={styles.progress}><strong>{readiness.completionPercent}%</strong><span>{readiness.verifiedProviders}/{readiness.totalProviders} providers verificados</span></div>
       </header>
 
       {activationError ? <p className={styles.formError} role="alert">Falha no retorno OAuth: {activationError}</p> : null}
 
       <section className={styles.summary} aria-label="Readiness geral">
-        <article><span>Produção</span><strong>{readiness.productionReady ? "Ready" : "Configuração pendente"}</strong></article>
-        <article><span>Providers</span><strong>{readiness.totalProviders}</strong></article>
-        <article><span>Conectados</span><strong>{readiness.connectedProviders}</strong></article>
+        <article><span>Produção</span><strong>{productionAudit.status}</strong></article>
+        <article><span>Conectados</span><strong>{readiness.connectedProviders}/{readiness.totalProviders}</strong></article>
+        <article><span>First-sync verificado</span><strong>{readiness.verifiedProviders}/{readiness.totalProviders}</strong></article>
       </section>
 
       <section className={styles.grid}>
@@ -85,17 +87,26 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
               <span className={styles.badge}>{provider.status}</span>
             </div>
             <dl>
-              <div><dt>Infraestrutura</dt><dd>{provider.infrastructureReady ? "pronta" : "pendente"}</dd></div>
               <div><dt>Conexões</dt><dd>{provider.connectionCount}</dd></div>
               <div><dt>Ativas</dt><dd>{provider.activeConnectionCount}</dd></div>
+              <div><dt>Verificadas</dt><dd>{provider.verifiedConnectionCount}</dd></div>
             </dl>
             {provider.missing.length > 0 ? (
               <div className={styles.missing}><strong>Falta configurar</strong><ul>{provider.missing.map((item) => <li key={item}>{item}</li>)}</ul></div>
-            ) : <p className={styles.ready}>Infraestrutura segura disponível.</p>}
+            ) : <p className={styles.ready}>{provider.firstSyncVerified ? "Primeira sincronização validada." : "Infraestrutura segura disponível."}</p>}
             <div className={styles.next}><span>Próximo passo</span><strong>{provider.nextAction}</strong></div>
             <a href={connectorsHref}>{provider.activeConnectionCount > 0 ? "Abrir operações" : "Ver diagnóstico"}</a>
           </article>
         ))}
+      </section>
+
+      <section className={styles.checklist}>
+        <div><p className={styles.eyebrow}>Production Audit</p><h2>Gate automático de rollout</h2></div>
+        <ol>
+          {productionAudit.checks.map((check) => (
+            <li key={check.key}><strong>{check.status.toUpperCase()} · {check.label}</strong> — {check.detail}</li>
+          ))}
+        </ol>
       </section>
 
       <PaidMediaActivationControls
@@ -110,15 +121,15 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
       <section className={styles.checklist}>
         <div><p className={styles.eyebrow}>Activation Checklist</p><h2>Critério mínimo para produção</h2></div>
         <ol>
-          <li>Vault criptografado e referências de credencial configuradas.</li>
+          <li>Vault criptografado, sessão e autenticação do scheduler configurados.</li>
           <li>OAuth concluído e conta Google Ads/Meta Ads escolhida explicitamente.</li>
           <li>HubSpot validado em leitura com Portal ID e mapa de propriedades de atribuição.</li>
-          <li>Conexão ACTIVE com primeira sincronização concluída sem erro.</li>
-          <li>Freshness operacional e dados de mídia, funil e atribuição no mesmo workspace.</li>
+          <li>Todas as conexões ACTIVE com primeira sincronização, watermark e freshness válidos.</li>
+          <li>Canal operacional configurado para receber alertas críticos fora da UI.</li>
         </ol>
       </section>
 
-      <footer className={styles.footer}><span>Guided Provider Activation · INT-38</span><span>Tehkné Solutions</span></footer>
+      <footer className={styles.footer}><span>Production Readiness · INT-39</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
@@ -143,7 +154,10 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
     await authorize(repository, { userId: session.userId, tenant, permission: "growth.command_center.read" });
     const canManagePaid = await hasPermission(repository, session.userId, tenant, "growth.connectors.manage");
     const canManageCrm = await hasPermission(repository, session.userId, tenant, "growth.crm.manage");
-    const readiness = await loadUnifiedOnboardingReadiness(database, workspaceId, process.env);
+    const [readiness, productionAudit] = await Promise.all([
+      loadUnifiedOnboardingReadiness(database, workspaceId, process.env),
+      auditProductionReadiness(database, workspaceId, process.env),
+    ]);
     let pending: PendingPaidMediaActivation | null = null;
     if (oauthAttemptId && canManagePaid && process.env.CONNECTOR_SECRET_MASTER_KEY) {
       try {
@@ -165,6 +179,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
       kind: "ready",
       tenant: brandId ? { operatorOrganizationId, clientOrganizationId, workspaceId, brandId } : { operatorOrganizationId, clientOrganizationId, workspaceId },
       readiness,
+      productionAudit,
       canManagePaid,
       canManageCrm,
       pending,
