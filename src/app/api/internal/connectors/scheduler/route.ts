@@ -7,6 +7,10 @@ import {
 } from "@/modules/growth-connectors/paid-media-performance-adapters";
 import { PostgresEncryptedSecretProvider } from "@/modules/growth-connectors/secret-provider";
 import type { ConnectorProvider } from "@/modules/growth-connectors/types";
+import {
+  deliverOperationsNotifications,
+  loadUnifiedOperationsNotificationCandidates,
+} from "@/modules/growth-operations/notifications";
 import { loadSectorPackManifest } from "@/modules/sector-packs/load-manifest";
 import { getDatabase } from "@/shared/db/client";
 
@@ -73,6 +77,16 @@ export async function GET(request: Request) {
       },
     );
 
+    const notificationCandidates = await loadUnifiedOperationsNotificationCandidates(database);
+    const notificationDelivery = await deliverOperationsNotifications(
+      database,
+      notificationCandidates,
+      {
+        ...(process.env.OPERATIONS_ALERT_WEBHOOK_URL ? { url: process.env.OPERATIONS_ALERT_WEBHOOK_URL } : {}),
+        ...(process.env.OPERATIONS_ALERT_WEBHOOK_BEARER ? { bearerToken: process.env.OPERATIONS_ALERT_WEBHOOK_BEARER } : {}),
+      },
+    );
+
     return Response.json({
       ok: result.status !== "FAILED",
       runId: result.runId,
@@ -85,6 +99,7 @@ export async function GET(request: Request) {
         ...alert,
         lastSuccessAt: alert.lastSuccessAt?.toISOString() ?? null,
       })),
+      notifications: notificationDelivery,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return Response.json({
