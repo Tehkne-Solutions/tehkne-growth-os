@@ -32,7 +32,7 @@ export type CanonicalCrmLead = Readonly<{
   lifecycleStage: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
-  attributionEvidence: readonly CanonicalCrmAttributionEvidence[];
+  attributionEvidence?: readonly CanonicalCrmAttributionEvidence[];
   properties: Readonly<Record<string, string | number | boolean | null>>;
 }>;
 
