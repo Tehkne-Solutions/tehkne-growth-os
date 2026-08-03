@@ -1,0 +1,71 @@
+name: RC Bootstrap Diagnostics
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rc-bootstrap-diagnostics.yml'
+      - '.github/workflows/release-candidate-deploy.yml'
+      - 'docs/releases/RC-1.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rc-bootstrap-diagnostics.yml'
+      - '.github/workflows/release-candidate-deploy.yml'
+      - 'docs/releases/RC-1.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose RC bootstrap prerequisites
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      RC_WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
+      GROWTH_OS_SCHEDULER_URL: ${{ secrets.GROWTH_OS_SCHEDULER_URL }}
+    steps:
+      - name: Report prerequisite status
+        run: |
+          missing=0
+          check_secret() {
+            name="$1"
+            value="$2"
+            if [ -n "$value" ]; then
+              echo "RC_BOOTSTRAP $name=configured"
+            else
+              echo "RC_BOOTSTRAP $name=missing"
+              missing=$((missing + 1))
+            fi
+          }
+
+          check_secret VERCEL_TOKEN "$VERCEL_TOKEN"
+          check_secret CRON_SECRET "$CRON_SECRET"
+          check_secret RC_WORKSPACE_ID "$RC_WORKSPACE_ID"
+
+          if [ -n "$GROWTH_OS_SCHEDULER_URL" ]; then
+            echo "RC_BOOTSTRAP GROWTH_OS_SCHEDULER_URL=configured"
+          else
+            echo "RC_BOOTSTRAP GROWTH_OS_SCHEDULER_URL=optional-missing"
+          fi
+
+          if [ "$missing" -eq 0 ]; then
+            echo "RC_BOOTSTRAP_STATUS=ready"
+          else
+            echo "RC_BOOTSTRAP_STATUS=blocked missing_required=$missing"
+          fi
+
+          {
+            echo "## Tehkné Growth OS RC bootstrap"
+            echo ""
+            echo "Required secrets are reported only as configured/missing; values are never printed."
+            echo ""
+            echo "- VERCEL_TOKEN: $([ -n "$VERCEL_TOKEN" ] && echo configured || echo missing)"
+            echo "- CRON_SECRET: $([ -n "$CRON_SECRET" ] && echo configured || echo missing)"
+            echo "- RC_WORKSPACE_ID: $([ -n "$RC_WORKSPACE_ID" ] && echo configured || echo missing)"
+            echo "- GROWTH_OS_SCHEDULER_URL: $([ -n "$GROWTH_OS_SCHEDULER_URL" ] && echo configured || echo optional-missing)"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
