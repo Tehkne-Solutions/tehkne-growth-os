@@ -15,9 +15,13 @@ type Tenant = {
 export function AttributionReviewButtons({
   tenant,
   attributionLinkId,
+  from,
+  to,
 }: Readonly<{
   tenant: Tenant;
   attributionLinkId: string;
+  from: string;
+  to: string;
 }>) {
   const router = useRouter();
   const [pending, setPending] = useState<"CONFIRMED" | "REJECTED" | null>(null);
@@ -30,7 +34,7 @@ export function AttributionReviewButtons({
       const response = await fetch("/api/growth/attribution-review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenant, attributionLinkId, decision }),
+        body: JSON.stringify({ tenant, attributionLinkId, decision, from, to }),
       });
       if (!response.ok) throw new Error("Não foi possível registrar a revisão.");
       router.refresh();
