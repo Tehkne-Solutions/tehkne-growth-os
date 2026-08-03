@@ -29,15 +29,8 @@ export class HubSpotCrmAdapter implements ReadOnlyCrmAdapter {
     if (cursor.phase === "contacts") {
       const page = await this.search("contacts", cursor.after, input.updatedAfter, input.limit, input.accessToken);
       const leads = page.results.map(mapContact);
-      const nextCursor = page.nextAfter
-        ? formatCursor("contacts", page.nextAfter)
-        : formatCursor("deals", null);
-      return {
-        leads,
-        opportunities: [],
-        nextCursor,
-        watermark: maxDate(leads.map((lead) => lead.updatedAt)),
-      };
+      const nextCursor = page.nextAfter ? formatCursor("contacts", page.nextAfter) : formatCursor("deals", null);
+      return { leads, opportunities: [], nextCursor, watermark: maxDate(leads.map((lead) => lead.updatedAt)) };
     }
 
     const page = await this.search("deals", cursor.after, input.updatedAfter, input.limit, input.accessToken);
@@ -64,41 +57,22 @@ export class HubSpotCrmAdapter implements ReadOnlyCrmAdapter {
     const properties = objectType === "contacts"
       ? ["email", "phone", "lifecyclestage", "createdate", "lastmodifieddate"]
       : ["pipeline", "dealstage", "amount", "deal_currency_code", "createdate", "hs_lastmodifieddate", "closedate", "hs_is_closed", "hs_is_closed_won"];
-
     const body = {
       limit: Math.min(Math.max(Math.trunc(limit), 1), 200),
       properties,
       sorts: [modifiedProperty],
       ...(after ? { after } : {}),
-      ...(updatedAfter
-        ? {
-            filterGroups: [{
-              filters: [{
-                propertyName: modifiedProperty,
-                operator: "GT",
-                value: String(updatedAfter.getTime()),
-              }],
-            }],
-          }
-        : {}),
+      ...(updatedAfter ? { filterGroups: [{ filters: [{ propertyName: modifiedProperty, operator: "GT", value: String(updatedAfter.getTime()) }] }] } : {}),
     };
 
     const response = await fetchImpl(`${baseUrl}${apiPath}/objects/${objectType}/search`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) {
-      throw new HubSpotCrmReadError(`HubSpot ${objectType} search failed with HTTP ${response.status}.`);
-    }
+    if (!response.ok) throw new HubSpotCrmReadError(`HubSpot ${objectType} search failed with HTTP ${response.status}.`);
     const payload = await response.json() as HubSpotSearchResponse;
-    return {
-      results: Array.isArray(payload.results) ? payload.results : [],
-      nextAfter: payload.paging?.next?.after ?? null,
-    };
+    return { results: Array.isArray(payload.results) ? payload.results : [], nextAfter: payload.paging?.next?.after ?? null };
   }
 }
 
@@ -116,10 +90,12 @@ type HubSpotSearchResponse = Readonly<{
 
 function mapContact(object: HubSpotObject): CanonicalCrmLead {
   const properties = object.properties ?? {};
+  const email = properties.email;
+  const phone = properties.phone;
   return {
     provider: "HUBSPOT",
     externalId: object.id,
-    identityHash: buildLeadIdentityHash({ email: properties.email, phone: properties.phone }),
+    identityHash: buildLeadIdentityHash({ ...(email !== undefined ? { email } : {}), ...(phone !== undefined ? { phone } : {}) }),
     lifecycleStage: properties.lifecyclestage ?? null,
     createdAt: parseDate(properties.createdate ?? object.createdAt),
     updatedAt: parseDate(properties.lastmodifieddate ?? object.updatedAt),
@@ -129,7 +105,6 @@ function mapContact(object: HubSpotObject): CanonicalCrmLead {
 
 function mapDeal(object: HubSpotObject): CanonicalCrmOpportunity {
   const properties = object.properties ?? {};
-  const amount = parseNumber(properties.amount);
   const won = parseBoolean(properties.hs_is_closed_won);
   const closed = parseBoolean(properties.hs_is_closed);
   return {
@@ -138,7 +113,7 @@ function mapDeal(object: HubSpotObject): CanonicalCrmOpportunity {
     primaryLeadExternalId: null,
     pipelineId: properties.pipeline ?? null,
     stageId: properties.dealstage ?? null,
-    amount,
+    amount: parseNumber(properties.amount),
     currency: normalizeCurrency(properties.deal_currency_code),
     status: won ? "WON" : closed ? "LOST" : "OPEN",
     createdAt: parseDate(properties.createdate ?? object.createdAt),
@@ -152,37 +127,11 @@ function parseCursor(value: string | null): Readonly<{ phase: "contacts" | "deal
   if (!value) return { phase: "contacts", after: null };
   const separator = value.indexOf(":");
   if (separator < 0) return { phase: "contacts", after: value };
-  const phase = value.slice(0, separator) === "deals" ? "deals" : "contacts";
-  const after = value.slice(separator + 1) || null;
-  return { phase, after };
+  return { phase: value.slice(0, separator) === "deals" ? "deals" : "contacts", after: value.slice(separator + 1) || null };
 }
-
-function formatCursor(phase: "contacts" | "deals", after: string | null): string {
-  return `${phase}:${after ?? ""}`;
-}
-
-function parseDate(value?: string | null): Date | null {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function parseNumber(value?: string | null): number | null {
-  if (!value) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseBoolean(value?: string | null): boolean {
-  return value === "true" || value === "1";
-}
-
-function normalizeCurrency(value?: string | null): string | null {
-  const normalized = value?.trim().toUpperCase();
-  return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : null;
-}
-
-function maxDate(values: readonly (Date | null)[]): Date | null {
-  const timestamps = values.flatMap((value) => value ? [value.getTime()] : []);
-  return timestamps.length > 0 ? new Date(Math.max(...timestamps)) : null;
-}
+function formatCursor(phase: "contacts" | "deals", after: string | null): string { return `${phase}:${after ?? ""}`; }
+function parseDate(value?: string | null): Date | null { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date; }
+function parseNumber(value?: string | null): number | null { if (!value) return null; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; }
+function parseBoolean(value?: string | null): boolean { return value === "true" || value === "1"; }
+function normalizeCurrency(value?: string | null): string | null { const normalized = value?.trim().toUpperCase(); return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : null; }
+function maxDate(values: readonly (Date | null)[]): Date | null { const timestamps = values.flatMap((value) => value ? [value.getTime()] : []); return timestamps.length > 0 ? new Date(Math.max(...timestamps)) : null; }
