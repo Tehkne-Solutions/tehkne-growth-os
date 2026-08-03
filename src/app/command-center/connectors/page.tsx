@@ -9,6 +9,7 @@ import {
 } from "@/modules/identity";
 import { getSessionCookieName } from "@/modules/identity/http/security";
 import { loadConnectorOperationsDiagnostics } from "@/modules/growth-connectors/operations-diagnostics";
+import { loadConnectorOperationsObservability } from "@/modules/growth-connectors/observability";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -31,7 +32,12 @@ type State =
   | { kind: "authentication-required" }
   | { kind: "forbidden" }
   | { kind: "unavailable" }
-  | { kind: "ready"; tenant: Tenant; diagnostics: Awaited<ReturnType<typeof loadConnectorOperationsDiagnostics>> };
+  | {
+      kind: "ready";
+      tenant: Tenant;
+      diagnostics: Awaited<ReturnType<typeof loadConnectorOperationsDiagnostics>>;
+      observability: Awaited<ReturnType<typeof loadConnectorOperationsObservability>>;
+    };
 
 export default async function ConnectorOperationsPage({ searchParams }: PageProps) {
   const state = await resolveState(await searchParams);
@@ -46,7 +52,9 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
     return <main className={styles.page}><section className={styles.state}><p>Tehkné Growth OS</p><h1>{title}</h1><span>{detail}</span></section></main>;
   }
 
-  const { tenant, diagnostics } = state;
+  const { tenant, diagnostics, observability } = state;
+  const latestSchedulerRun = observability.scheduler.latestRun;
+
   return (
     <main className={styles.page}>
       <header className={styles.header}>
@@ -57,6 +65,42 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
         </div>
         <a href={commandCenterHref(tenant)}>Voltar ao Command Center</a>
       </header>
+
+      <section className={styles.controlPlane} aria-label="Estado do control plane">
+        <article className={styles.controlCard}>
+          <span>Control Plane</span>
+          <strong data-state={observability.scheduler.status}>{observability.scheduler.status}</strong>
+          <small>{latestSchedulerRun ? `Última execução ${formatDateTime(latestSchedulerRun.startedAt)}` : "Ainda sem execução registrada"}</small>
+        </article>
+        <article className={styles.controlCard}>
+          <span>Último scheduler</span>
+          <strong>{latestSchedulerRun?.status ?? "—"}</strong>
+          <small>{latestSchedulerRun?.triggerSource ?? "Sem trigger registrado"}</small>
+        </article>
+        <article className={styles.controlCard}>
+          <span>Atenção operacional</span>
+          <strong>{observability.notifications.length}</strong>
+          <small>{observability.notifications.length === 1 ? "conector exige revisão" : "conectores exigem revisão"}</small>
+        </article>
+      </section>
+
+      {observability.notifications.length > 0 ? (
+        <section className={styles.alertSection} aria-label="Alertas de conectores">
+          <div className={styles.sectionHeader}>
+            <div><p className={styles.eyebrow}>Operations Alerts</p><h2>Contas que exigem ação humana</h2></div>
+            <span>{observability.notifications.length} alertas do workspace</span>
+          </div>
+          <div className={styles.alertGrid}>
+            {observability.notifications.map((notification) => (
+              <article className={styles.alertCard} data-severity={notification.severity} key={notification.key}>
+                <span>{notification.severity} · {notification.reason}</span>
+                <h3>{notification.title}</h3>
+                <p>{notification.detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className={styles.grid} aria-label="Conectores">
         {diagnostics.health.length === 0 ? (
@@ -86,7 +130,7 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
       </section>
 
       <section className={styles.runs}>
-        <div className={styles.sectionHeader}><div><p className={styles.eyebrow}>Sync Runs</p><h2>Execuções recentes</h2></div><span>{diagnostics.recentRuns.length} registros</span></div>
+        <div className={styles.sectionHeader}><div><p className={styles.eyebrow}>Sync Runs</p><h2>Execuções recentes do workspace</h2></div><span>{diagnostics.recentRuns.length} registros</span></div>
         <div className={styles.tableWrap}>
           <table>
             <thead><tr><th>Início</th><th>Status</th><th>Lidos</th><th>Gravados</th><th>Deduplicados</th><th>Erro</th></tr></thead>
@@ -106,7 +150,27 @@ export default async function ConnectorOperationsPage({ searchParams }: PageProp
         </div>
       </section>
 
-      <footer className={styles.footer}><span>Connector Operations · INT-28</span><span>Tehkné Solutions</span></footer>
+      <section className={styles.runs}>
+        <div className={styles.sectionHeader}><div><p className={styles.eyebrow}>Scheduler Pulse</p><h2>Histórico do control plane</h2></div><span>{observability.scheduler.recentRuns.length} execuções</span></div>
+        <div className={styles.tableWrap}>
+          <table>
+            <thead><tr><th>Início</th><th>Trigger</th><th>Status</th><th>Duração</th><th>Budget</th></tr></thead>
+            <tbody>
+              {observability.scheduler.recentRuns.map((run) => (
+                <tr key={run.runId}>
+                  <td>{formatDateTime(run.startedAt)}</td>
+                  <td>{run.triggerSource}</td>
+                  <td>{run.status}</td>
+                  <td>{formatDuration(run.startedAt, run.finishedAt)}</td>
+                  <td>{Math.round(run.budgetMs / 1000)}s</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer className={styles.footer}><span>Connector Observability · INT-30</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
@@ -129,11 +193,15 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
     const session = await validateSession(authorizationStore, token, secret);
     const tenant = parseTenantContext({ operatorOrganizationId, clientOrganizationId, workspaceId, ...(brandId ? { brandId } : {}) });
     await authorize(authorizationStore, { userId: session.userId, tenant, permission: "growth.connectors.manage" });
-    const diagnostics = await loadConnectorOperationsDiagnostics(database, workspaceId);
+    const [diagnostics, observability] = await Promise.all([
+      loadConnectorOperationsDiagnostics(database, workspaceId),
+      loadConnectorOperationsObservability(database, workspaceId),
+    ]);
     return {
       kind: "ready",
       tenant: brandId ? { operatorOrganizationId, clientOrganizationId, workspaceId, brandId } : { operatorOrganizationId, clientOrganizationId, workspaceId },
       diagnostics,
+      observability,
     };
   } catch (error) {
     if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
@@ -164,4 +232,10 @@ function formatProvider(provider: string): string {
 
 function formatDateTime(value: Date | null): string {
   return value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(value) : "—";
+}
+
+function formatDuration(startedAt: Date, finishedAt: Date | null): string {
+  if (!finishedAt) return "em execução";
+  const seconds = Math.max(0, Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000));
+  return `${seconds}s`;
 }

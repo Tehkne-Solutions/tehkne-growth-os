@@ -23,13 +23,15 @@
 .header h1,
 .sectionHeader h2,
 .card h2,
-.state h1 {
+.state h1,
+.alertCard h3 {
   margin: 4px 0 8px;
 }
 
 .header p,
 .card p,
-.state span {
+.state span,
+.alertCard p {
   color: #6b7280;
 }
 
@@ -49,6 +51,80 @@
   color: #4b5563;
 }
 
+.controlPlane {
+  max-width: 1280px;
+  margin: 0 auto 24px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.controlCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  background: #111827;
+  color: #fff;
+  border-radius: 16px;
+}
+
+.controlCard > span,
+.controlCard small {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.controlCard strong {
+  font-size: 22px;
+  text-transform: uppercase;
+}
+
+.controlCard strong[data-state="healthy"] { color: #86efac; }
+.controlCard strong[data-state="degraded"] { color: #fca5a5; }
+.controlCard strong[data-state="unknown"] { color: #fde68a; }
+
+.alertSection,
+.runs {
+  max-width: 1280px;
+  margin: 0 auto 32px;
+  padding: 22px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(17, 24, 39, .04);
+}
+
+.alertGrid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.alertCard {
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.alertCard > span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.alertCard[data-severity="critical"] {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.alertCard[data-severity="critical"] > span { color: #b91c1c; }
+.alertCard[data-severity="warning"] { border-color: #fde68a; background: #fffdf5; }
+.alertCard[data-severity="warning"] > span { color: #b45309; }
+
 .grid {
   max-width: 1280px;
   margin: 0 auto 32px;
@@ -58,7 +134,6 @@
 }
 
 .card,
-.runs,
 .state {
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -129,12 +204,6 @@
   cursor: wait;
 }
 
-.runs {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 22px;
-}
-
 .tableWrap {
   margin-top: 18px;
   overflow-x: auto;
@@ -171,6 +240,10 @@
   border-top: 1px solid #e5e7eb;
   color: #6b7280;
   font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .controlPlane { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
