@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { persistLeadAttributionEvidence } from "@/modules/growth-attribution/capture";
 import type { SecretProvider } from "@/modules/growth-connectors/secret-provider";
 import type { DatabaseClient } from "@/shared/db/client";
 
@@ -13,6 +14,7 @@ import type {
 export type CrmSyncResult = Readonly<{
   leadsUpserted: number;
   opportunitiesUpserted: number;
+  attributionLinksWritten: number;
   funnelEventsWritten: number;
   growthEventsProjected: number;
   pagesRead: number;
@@ -47,6 +49,7 @@ export async function syncCrmFunnel(
   let watermark = input.connection.watermark;
   let leadsUpserted = 0;
   let opportunitiesUpserted = 0;
+  let attributionLinksWritten = 0;
   let funnelEventsWritten = 0;
   let growthEventsProjected = 0;
   let pagesRead = 0;
@@ -72,6 +75,14 @@ export async function syncCrmFunnel(
         leadsUpserted += 1;
         funnelEventsWritten += result.funnelEvents;
         growthEventsProjected += result.growthEvents;
+        if (lead.attributionEvidence.length > 0) {
+          attributionLinksWritten += await persistLeadAttributionEvidence(dependencies.database, {
+            workspaceId: input.connection.workspaceId,
+            leadId: result.leadId,
+            observedAt: lead.updatedAt ?? lead.createdAt ?? now,
+            evidence: lead.attributionEvidence,
+          });
+        }
       }
       for (const opportunity of page.opportunities) {
         const result = await upsertOpportunity(dependencies.database, input, opportunity);
@@ -110,6 +121,7 @@ export async function syncCrmFunnel(
   return {
     leadsUpserted,
     opportunitiesUpserted,
+    attributionLinksWritten,
     funnelEventsWritten,
     growthEventsProjected,
     pagesRead,
@@ -122,7 +134,7 @@ async function upsertLead(
   database: DatabaseClient,
   input: Parameters<typeof syncCrmFunnel>[1],
   lead: CanonicalCrmLead,
-): Promise<Readonly<{ funnelEvents: number; growthEvents: number }>> {
+): Promise<Readonly<{ leadId: string; funnelEvents: number; growthEvents: number }>> {
   const existing = await database.$queryRaw<Array<{ id: string; lifecycleStage: string | null }>>`
     SELECT id, lifecycle_stage AS "lifecycleStage"
     FROM growth_crm_leads
@@ -153,10 +165,10 @@ async function upsertLead(
 
   const isNew = existing.length === 0;
   const stageChanged = !isNew && existing[0]?.lifecycleStage !== lead.lifecycleStage;
-  if (!isNew && !stageChanged) return { funnelEvents: 0, growthEvents: 0 };
+  if (!isNew && !stageChanged) return { leadId, funnelEvents: 0, growthEvents: 0 };
   const eventType = isNew ? "crm_lead_created" : "crm_lead_stage_changed";
   const occurredAt = lead.updatedAt ?? lead.createdAt ?? input.now ?? new Date();
-  return writeFunnelEvent(database, input, {
+  const event = await writeFunnelEvent(database, input, {
     subjectType: "LEAD",
     subjectId: leadId,
     externalId: lead.externalId,
@@ -164,6 +176,7 @@ async function upsertLead(
     stageId: lead.lifecycleStage,
     occurredAt,
   });
+  return { leadId, ...event };
 }
 
 async function upsertOpportunity(
