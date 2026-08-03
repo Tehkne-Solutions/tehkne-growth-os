@@ -1,0 +1,27 @@
+name: Connector Scheduler
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger connector control plane
+        env:
+          SCHEDULER_URL: ${{ secrets.GROWTH_OS_SCHEDULER_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$SCHEDULER_URL"
+          test -n "$CRON_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "X-Scheduler-Source: github-actions" \
+            "$SCHEDULER_URL"
