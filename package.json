@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:production": "node scripts/production-readiness-smoke.mjs",
     "format:check": "prettier --check .",
     "format:write": "prettier --write .",
     "db:generate": "prisma generate",

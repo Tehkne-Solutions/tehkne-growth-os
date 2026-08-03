@@ -7,7 +7,14 @@ import {
 } from "@/modules/growth-connectors/paid-media-performance-adapters";
 import { PostgresEncryptedSecretProvider } from "@/modules/growth-connectors/secret-provider";
 import type { ConnectorProvider } from "@/modules/growth-connectors/types";
+import { runCrmControlPlane } from "@/modules/growth-crm/control-plane";
+import { HubSpotCrmAdapter } from "@/modules/growth-crm/hubspot-adapter";
+import {
+  deliverOperationsNotifications,
+  loadUnifiedOperationsNotificationCandidates,
+} from "@/modules/growth-operations/notifications";
 import { loadSectorPackManifest } from "@/modules/sector-packs/load-manifest";
+import type { DatabaseClient } from "@/shared/db/client";
 import { getDatabase } from "@/shared/db/client";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +36,7 @@ export async function GET(request: Request) {
     const database = getDatabase();
     const secrets = new PostgresEncryptedSecretProvider(database, masterKey);
     const triggerSource = readTriggerSource(request);
-    const result = await runConnectorControlPlane(
+    const paidMedia = await runConnectorControlPlane(
       {
         database,
         secrets,
@@ -52,39 +59,68 @@ export async function GET(request: Request) {
         resolveRefresher() {
           return null;
         },
-        async resolveSectorPack(workspaceId: string) {
-          const committed = await database.metricImportBatch.findFirst({
-            where: { workspaceId, status: "COMMITTED" },
-            orderBy: { committedAt: "desc" },
-            select: { sectorPackId: true, sectorPackVersion: true },
-          });
-          if (!committed) throw new Error(`Workspace ${workspaceId} has no committed Sector Pack.`);
-          return loadSectorPackManifest({
-            id: committed.sectorPackId,
-            version: committed.sectorPackVersion,
-          });
-        },
+        resolveSectorPack: (workspaceId) => resolveSectorPack(database, workspaceId),
       },
       {
         triggerSource,
-        budgetMs: 45_000,
+        budgetMs: 30_000,
         dueAfterMinutes: 180,
         limit: 20,
       },
     );
 
+    const crm = paidMedia.status === "SKIPPED_LOCKED"
+      ? { status: "SKIPPED_LOCKED" as const, results: [], budgetMs: 15_000 }
+      : await runCrmControlPlane(
+          {
+            database,
+            secrets,
+            resolveAdapter() {
+              return new HubSpotCrmAdapter();
+            },
+            resolveRefresher() {
+              return null;
+            },
+            resolveSectorPack: (workspaceId) => resolveSectorPack(database, workspaceId),
+          },
+          {
+            budgetMs: 15_000,
+            dueAfterMinutes: 180,
+            limit: 10,
+          },
+        );
+
+    const notificationCandidates = await loadUnifiedOperationsNotificationCandidates(database);
+    const notificationDelivery = await deliverOperationsNotifications(
+      database,
+      notificationCandidates,
+      {
+        ...(process.env.OPERATIONS_ALERT_WEBHOOK_URL ? { url: process.env.OPERATIONS_ALERT_WEBHOOK_URL } : {}),
+        ...(process.env.OPERATIONS_ALERT_WEBHOOK_BEARER ? { bearerToken: process.env.OPERATIONS_ALERT_WEBHOOK_BEARER } : {}),
+      },
+    );
+
+    const failed = paidMedia.status === "FAILED" || crm.status === "FAILED";
     return Response.json({
-      ok: result.status !== "FAILED",
-      runId: result.runId,
-      status: result.status,
-      budgetMs: result.budgetMs,
-      processed: result.results.length,
-      succeeded: result.results.filter((item) => item.ok).length,
-      failed: result.results.filter((item) => !item.ok).length,
-      alerts: result.alerts.map((alert) => ({
-        ...alert,
-        lastSuccessAt: alert.lastSuccessAt?.toISOString() ?? null,
-      })),
+      ok: !failed,
+      runId: paidMedia.runId,
+      status: failed ? "FAILED" : paidMedia.status,
+      paidMedia: {
+        status: paidMedia.status,
+        budgetMs: paidMedia.budgetMs,
+        processed: paidMedia.results.length,
+        succeeded: paidMedia.results.filter((item) => item.ok).length,
+        failed: paidMedia.results.filter((item) => !item.ok).length,
+      },
+      crm: {
+        status: crm.status,
+        budgetMs: crm.budgetMs,
+        processed: crm.results.length,
+        succeeded: crm.results.filter((item) => item.ok).length,
+        failed: crm.results.filter((item) => !item.ok).length,
+      },
+      alerts: notificationCandidates.length,
+      notifications: notificationDelivery,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return Response.json({
@@ -92,6 +128,16 @@ export async function GET(request: Request) {
       detail: error instanceof Error ? error.message : "Unknown scheduler failure",
     }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
+}
+
+async function resolveSectorPack(database: DatabaseClient, workspaceId: string) {
+  const committed = await database.metricImportBatch.findFirst({
+    where: { workspaceId, status: "COMMITTED" },
+    orderBy: { committedAt: "desc" },
+    select: { sectorPackId: true, sectorPackVersion: true },
+  });
+  if (!committed) throw new Error(`Workspace ${workspaceId} has no committed Sector Pack.`);
+  return loadSectorPackManifest({ id: committed.sectorPackId, version: committed.sectorPackVersion });
 }
 
 function authorized(header: string | null, secret: string): boolean {
