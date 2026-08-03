@@ -24,11 +24,14 @@ export async function ensureFreshConnectorToken(input: Readonly<{
   if (!existing.refreshToken) throw new Error("Connector token is expiring and no refresh token is available.");
 
   const refreshed = await input.refresher.refresh({ refreshToken: existing.refreshToken });
+  const scope = refreshed.scope ?? existing.scope;
+  const tokenType = refreshed.tokenType ?? existing.tokenType;
   const merged: OAuthTokenBundle = {
-    ...refreshed,
+    accessToken: refreshed.accessToken,
     refreshToken: refreshed.refreshToken ?? existing.refreshToken,
-    scope: refreshed.scope ?? existing.scope,
-    tokenType: refreshed.tokenType ?? existing.tokenType,
+    ...(scope ? { scope } : {}),
+    ...(tokenType ? { tokenType } : {}),
+    ...(refreshed.expiresAt ? { expiresAt: refreshed.expiresAt } : {}),
   };
   await input.secrets.put(input.secretRef, serializeTokenBundle(merged));
   return { refreshed: true, expiresAt: merged.expiresAt ?? null };
