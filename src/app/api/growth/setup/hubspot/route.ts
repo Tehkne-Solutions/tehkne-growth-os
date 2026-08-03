@@ -10,6 +10,7 @@ import {
 } from "@/modules/identity";
 import { assertSameOrigin, getSessionCookieName, InvalidRequestOriginError } from "@/modules/identity/http/security";
 import { PostgresEncryptedSecretProvider } from "@/modules/growth-connectors/secret-provider";
+import type { HubSpotAttributionPropertyMap } from "@/modules/growth-crm/types";
 import {
   configureHubSpotPrivateApp,
   GuidedActivationConfigurationError,
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
     const masterKey = process.env.CONNECTOR_SECRET_MASTER_KEY;
     if (!masterKey) throw new GuidedActivationConfigurationError("Connector secret master key is unavailable.");
     const secrets = new PostgresEncryptedSecretProvider(database, masterKey);
+    const attributionProperties = normalizeAttributionProperties(body.attributionProperties);
     const result = await configureHubSpotPrivateApp(
       { database, secrets },
       {
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
         portalId: body.portalId,
         displayName: body.displayName,
         accessToken: body.accessToken,
-        attributionProperties: body.attributionProperties,
+        attributionProperties,
       },
     );
     return Response.json(result, { status: 200, headers: { "Cache-Control": "no-store" } });
@@ -80,4 +82,19 @@ export async function POST(request: Request) {
     if (error instanceof GuidedActivationConfigurationError) return Response.json({ error: "hubspot_setup_not_configured" }, { status: 503 });
     return Response.json({ error: "hubspot_setup_unavailable" }, { status: 503 });
   }
+}
+
+function normalizeAttributionProperties(
+  input: z.infer<typeof requestSchema>["attributionProperties"],
+): HubSpotAttributionPropertyMap {
+  return {
+    ...(input.gclid ? { gclid: input.gclid } : {}),
+    ...(input.gbraid ? { gbraid: input.gbraid } : {}),
+    ...(input.wbraid ? { wbraid: input.wbraid } : {}),
+    ...(input.fbclid ? { fbclid: input.fbclid } : {}),
+    ...(input.utmCampaign ? { utmCampaign: input.utmCampaign } : {}),
+    ...(input.utmSource ? { utmSource: input.utmSource } : {}),
+    ...(input.googleCampaignId ? { googleCampaignId: input.googleCampaignId } : {}),
+    ...(input.metaCampaignId ? { metaCampaignId: input.metaCampaignId } : {}),
+  };
 }
