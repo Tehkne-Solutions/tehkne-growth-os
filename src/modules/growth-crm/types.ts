@@ -2,6 +2,21 @@ export type CrmProvider = "HUBSPOT";
 export type CrmConnectionStatus = "ACTIVE" | "PAUSED" | "ERROR" | "DISCONNECTED";
 export type CrmOpportunityStatus = "OPEN" | "WON" | "LOST";
 
+export type HubSpotAttributionPropertyMap = Readonly<{
+  gclid?: string;
+  gbraid?: string;
+  wbraid?: string;
+  fbclid?: string;
+  utmCampaign?: string;
+  utmSource?: string;
+  googleCampaignId?: string;
+  metaCampaignId?: string;
+}>;
+
+export type CrmConnectionSettings = Readonly<{
+  attributionProperties?: HubSpotAttributionPropertyMap;
+}>;
+
 export type CanonicalCrmAttributionEvidence = Readonly<{
   type: "CLICK_ID" | "EXPLICIT_CAMPAIGN_ID" | "UTM_CAMPAIGN_ID";
   value: string;
@@ -18,6 +33,7 @@ export type CrmConnection = Readonly<{
   displayName: string;
   status: CrmConnectionStatus;
   secretRef: string | null;
+  settings?: CrmConnectionSettings;
   cursor: string | null;
   watermark: Date | null;
   lastSuccessAt: Date | null;
