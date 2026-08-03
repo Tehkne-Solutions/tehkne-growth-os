@@ -90,6 +90,7 @@ export async function runDueConnectorSyncs(dependencies: Readonly<{
   now?: Date;
   dueAfterMinutes?: number;
   limit?: number;
+  deadlineAt?: Date;
 }> = {}): Promise<ScheduledConnectorResult[]> {
   const now = input.now ?? new Date();
   const due = await listDueConnectorConnections(dependencies.database, now, input.dueAfterMinutes ?? 180);
@@ -97,6 +98,7 @@ export async function runDueConnectorSyncs(dependencies: Readonly<{
   const results: ScheduledConnectorResult[] = [];
 
   for (const connection of selected) {
+    if (input.deadlineAt && Date.now() >= input.deadlineAt.getTime()) break;
     let attempts = 0;
     try {
       if (!connection.secretRef) throw new Error("Connector connection has no token secret reference.");
