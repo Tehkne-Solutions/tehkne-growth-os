@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildOperationsNotificationFingerprint,
   deliverOperationsNotifications,
+  postOperationsWebhookWithRetry,
   type OperationsNotificationCandidate,
 } from "@/modules/growth-operations/notifications";
 import { auditProductionReadiness } from "@/modules/growth-operations/production-readiness";
@@ -34,6 +35,36 @@ describe("operations notifications", () => {
     const result = await deliverOperationsNotifications(database as never, [candidate], {});
     expect(result).toEqual({ configured: false, attempted: 0, sent: 0, failed: 0, deduplicated: 0 });
     expect(database.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("retries transient webhook failures and succeeds within the bounded attempt budget", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const result = await postOperationsWebhookWithRetry(
+      "https://ops.example.test/hook",
+      candidate,
+      new Date("2026-08-03T12:00:00.000Z"),
+      undefined,
+      3,
+      fetchImpl as typeof fetch,
+    );
+    expect(result).toEqual({ ok: true, attempts: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry permanent client errors", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 400 }));
+    const result = await postOperationsWebhookWithRetry(
+      "https://ops.example.test/hook",
+      candidate,
+      new Date("2026-08-03T12:00:00.000Z"),
+      undefined,
+      3,
+      fetchImpl as typeof fetch,
+    );
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 
