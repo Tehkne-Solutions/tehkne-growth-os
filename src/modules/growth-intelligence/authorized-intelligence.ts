@@ -7,6 +7,7 @@ import type { DatabaseClient } from "@/shared/db/client";
 
 import { deriveDecisionSignals } from "./decision-signals";
 import { enrichCommandCenterIntelligence, type InterpretedCommandCenterIntelligence } from "./enrich-command-center";
+import { deriveFullFunnelSummary, type FullFunnelSummary } from "./full-funnel-summary";
 import { loadActiveMetricGoals } from "./goal-repository";
 import { loadDeclarativePlaybook } from "./load-playbook";
 import { deriveMomentumDecisionSignals, mergeDecisionSignals } from "./momentum-signals";
@@ -21,6 +22,7 @@ export type AuthorizedInterpretedCommandCenterIntelligence =
   InterpretedCommandCenterIntelligence & {
     timeSeries: MetricTimeSeries[];
     recommendations: PlaybookRecommendation[];
+    fullFunnel: FullFunnelSummary;
   };
 
 export async function loadAuthorizedInterpretedCommandCenterIntelligence(
@@ -65,14 +67,16 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
   });
 
   if (!committedPack) {
+    const interpreted = enrichCommandCenterIntelligence({
+      intelligence,
+      sectorPack: null,
+      goals: [],
+    });
     return {
-      ...enrichCommandCenterIntelligence({
-        intelligence,
-        sectorPack: null,
-        goals: [],
-      }),
+      ...interpreted,
       timeSeries: deriveMetricTimeSeries({ snapshots, directions: new Map() }),
       recommendations: [],
+      fullFunnel: deriveFullFunnelSummary(interpreted.interpretedMetrics),
     };
   }
 
@@ -107,5 +111,6 @@ export async function loadAuthorizedInterpretedCommandCenterIntelligence(
     recommendations: playbook
       ? derivePlaybookRecommendations({ playbook, signals, timeSeries })
       : [],
+    fullFunnel: deriveFullFunnelSummary(interpreted.interpretedMetrics),
   };
 }
