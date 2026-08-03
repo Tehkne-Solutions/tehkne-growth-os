@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:production": "node scripts/production-readiness-smoke.mjs",
+    "smoke:rc": "node scripts/release-candidate-smoke.mjs",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "format:check": "prettier --check .",
     "format:write": "prettier --write .",
