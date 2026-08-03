@@ -1,6 +1,17 @@
 name: Release Candidate Deploy
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "prisma/**"
+      - "sector-packs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.ts"
+      - "vercel.json"
+      - ".github/workflows/release-candidate-deploy.yml"
   workflow_dispatch:
     inputs:
       target:
@@ -16,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: growth-os-rc-deploy-${{ inputs.target }}
+  group: growth-os-rc-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
   cancel-in-progress: false
 
 jobs:
@@ -29,6 +40,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
+      RC_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
 
     steps:
       - name: Checkout
@@ -40,11 +52,12 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Verify required release secrets
+      - name: Verify Vercel deployment credential
         run: |
-          test -n "$VERCEL_TOKEN"
-          test -n "$CRON_SECRET"
-          test -n "$WORKSPACE_ID"
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "RC_DEPLOY=BLOCKED missing=VERCEL_TOKEN"
+            exit 2
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -70,13 +83,23 @@ jobs:
         id: deploy
         run: |
           TARGET_FLAG=""
-          if [ "${{ inputs.target }}" = "production" ]; then
+          if [ "$RC_TARGET" = "production" ]; then
             TARGET_FLAG="--prod"
           fi
           URL=$(vercel deploy $TARGET_FLAG --yes --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "GROWTH_OS_BASE_URL=$URL" >> "$GITHUB_ENV"
           echo "Release candidate deployed to $URL"
+
+      - name: Verify smoke credentials
+        run: |
+          missing=""
+          [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
+          [ -n "$WORKSPACE_ID" ] || missing="$missing RC_WORKSPACE_ID"
+          if [ -n "$missing" ]; then
+            echo "RC_SMOKE=BLOCKED missing=$missing"
+            exit 2
+          fi
 
       - name: Validate published release candidate
         run: npm run smoke:rc
@@ -87,7 +110,7 @@ jobs:
           {
             echo "## Tehkné Growth OS RC deployment"
             echo ""
-            echo "- Target: ${{ inputs.target }}"
+            echo "- Target: $RC_TARGET"
             echo "- Deployment: ${{ steps.deploy.outputs.url }}"
             echo "- Commit: $GITHUB_SHA"
             echo "- Signature: Tehkné Solutions"
