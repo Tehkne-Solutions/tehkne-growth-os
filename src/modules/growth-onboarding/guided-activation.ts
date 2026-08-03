@@ -34,6 +34,19 @@ export type PendingPaidMediaActivation = Readonly<{
 export class GuidedActivationConfigurationError extends Error {}
 export class GuidedActivationValidationError extends Error {}
 
+export function guidedActivationEnvironmentFromProcess(environment: NodeJS.ProcessEnv): GuidedActivationEnvironment {
+  const appUrl = environment.APP_URL;
+  if (!appUrl) throw new GuidedActivationConfigurationError("APP_URL is required for guided activation.");
+  return {
+    appUrl,
+    ...(environment.GOOGLE_ADS_API_VERSION ? { googleApiVersion: environment.GOOGLE_ADS_API_VERSION } : {}),
+    ...(environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF ? { googleDeveloperTokenSecretRef: environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF } : {}),
+    ...(environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF ? { googleOAuthClientSecretRef: environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF } : {}),
+    ...(environment.META_GRAPH_API_VERSION ? { metaApiVersion: environment.META_GRAPH_API_VERSION } : {}),
+    ...(environment.META_ADS_OAUTH_CLIENT_SECRET_REF ? { metaOAuthClientSecretRef: environment.META_ADS_OAUTH_CLIENT_SECRET_REF } : {}),
+  };
+}
+
 export async function startPaidMediaActivation(
   dependencies: Readonly<{
     database: DatabaseClient;
@@ -87,7 +100,7 @@ export async function completePaidMediaActivationCallback(
   `;
   const candidate = rows[0];
   if (!candidate) throw new GuidedActivationValidationError("OAuth activation state is unavailable.");
-  const adapter = paidMediaAdapter(candidate.provider, dependencies.secrets, input.environment);
+  const adapter = paidMediaAdapter(candidate.provider, input.environment);
   const result = await exchangeCodeAndDiscoverAccounts(
     { database: dependencies.database, secrets: dependencies.secrets, adapter },
     {
@@ -127,7 +140,7 @@ export async function loadPendingPaidMediaActivation(
   `;
   const attempt = rows[0];
   if (!attempt?.tokenSecretRef) return null;
-  const adapter = paidMediaAdapter(attempt.provider, dependencies.secrets, input.environment);
+  const adapter = paidMediaAdapter(attempt.provider, input.environment);
   const accounts = await adapter.listAccessibleAccounts({
     provider: attempt.provider,
     tokenSecretRef: attempt.tokenSecretRef,
@@ -157,7 +170,7 @@ export async function activatePendingPaidMediaAccount(
   `;
   const provider = rows[0]?.provider;
   if (!provider) throw new GuidedActivationValidationError("Pending OAuth activation was not found.");
-  const adapter = paidMediaAdapter(provider, dependencies.secrets, input.environment);
+  const adapter = paidMediaAdapter(provider, input.environment);
   const result = await activateDiscoveredConnectorAccount(
     { database: dependencies.database, secrets: dependencies.secrets, adapter },
     {
@@ -251,10 +264,8 @@ function providerConfiguration(provider: PaidMediaActivationProvider, environmen
 
 function paidMediaAdapter(
   provider: PaidMediaActivationProvider,
-  secrets: SecretProvider,
   environment: GuidedActivationEnvironment,
 ): ReadOnlyProviderAdapter {
-  void secrets;
   if (provider === "GOOGLE_ADS") {
     if (!environment.googleApiVersion || !environment.googleDeveloperTokenSecretRef) {
       throw new GuidedActivationConfigurationError("Google Ads API configuration is incomplete.");
