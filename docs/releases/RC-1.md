@@ -13,6 +13,7 @@ Validate the already-hardened Growth OS build against a real published environme
 - `GROWTH_OS_BASE_URL`: public HTTPS deployment URL.
 - `CRON_SECRET`: production/staging scheduler secret.
 - `WORKSPACE_ID`: validation workspace with representative connectors configured.
+- `VERCEL_TOKEN`: GitHub Actions secret used only by the manual RC deployment workflow.
 
 Never commit these values.
 
@@ -29,6 +30,18 @@ Never commit these values.
 9. `npm run smoke:rc`
 
 `smoke:rc` validates the public surface, required security headers and the authenticated production-readiness endpoint. Any HTTP 5xx, missing mandatory header, failed readiness check or `blocked` readiness status fails the candidate.
+
+## Vercel RC deployment
+
+The manual GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It installs the Vercel CLI, links the repository non-interactively, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment.
+
+Required GitHub Actions secrets:
+
+- `VERCEL_TOKEN`
+- `CRON_SECRET`
+- `RC_WORKSPACE_ID`
+
+The Vercel project must contain the runtime environment variables documented by production readiness, including database, vault, OAuth/provider configuration and scheduler secrets. The workflow does not copy secret values into source control.
 
 ## Real-operation validation
 
