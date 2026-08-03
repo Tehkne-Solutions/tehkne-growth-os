@@ -75,12 +75,13 @@ export async function syncCrmFunnel(
         leadsUpserted += 1;
         funnelEventsWritten += result.funnelEvents;
         growthEventsProjected += result.growthEvents;
-        if (lead.attributionEvidence.length > 0) {
+        const attributionEvidence = lead.attributionEvidence ?? [];
+        if (attributionEvidence.length > 0) {
           attributionLinksWritten += await persistLeadAttributionEvidence(dependencies.database, {
             workspaceId: input.connection.workspaceId,
             leadId: result.leadId,
             observedAt: lead.updatedAt ?? lead.createdAt ?? now,
-            evidence: lead.attributionEvidence,
+            evidence: attributionEvidence,
           });
         }
       }
