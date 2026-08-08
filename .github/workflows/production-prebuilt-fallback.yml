@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/production-prebuilt-fallback.yml"
+      - ".github/workflows/release-candidate-deploy.yml"
+      - "vercel.json"
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -68,17 +70,39 @@ jobs:
         run: vercel pull --yes --environment=preview --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Build Preview artifacts in GitHub Actions
-        run: vercel build --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+        run: |
+          vercel build --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+          test -f .vercel/output/config.json
+          echo "PREBUILT_PREVIEW_BUILD=PASS"
 
-      - name: Deploy prebuilt Preview artifacts
+      - name: Attempt prebuilt Preview deployment
         id: deploy
         shell: bash
         run: |
-          url=$(vercel deploy --prebuilt --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          set +e
+          output=$(vercel deploy --prebuilt --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+
+          if [ "$status" -ne 0 ]; then
+            if printf '%s\n' "$output" | grep -Fq 'api-deployments-free-per-day'; then
+              echo "quota_blocked=true" >> "$GITHUB_OUTPUT"
+              echo "PREBUILT_PREVIEW_DEPLOYMENT=BLOCKED quota=api-deployments-free-per-day build=PASS"
+              exit 0
+            fi
+            echo "PREBUILT_PREVIEW_DEPLOYMENT=FAIL exit=$status"
+            exit "$status"
+          fi
+
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | tail -n 1)
+          test -n "$url"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "PREBUILT_PREVIEW_DEPLOYMENT=$url"
+          echo "quota_blocked=false" >> "$GITHUB_OUTPUT"
+          echo "PREBUILT_PREVIEW_DEPLOYMENT=PASS url=$url"
 
       - name: Verify deployed Preview runtime
+        if: steps.deploy.outputs.quota_blocked != 'true'
         shell: bash
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
@@ -138,6 +162,21 @@ jobs:
             });
           '
           echo "PREBUILT_PREVIEW=PASS"
+
+      - name: Record quota-limited Preview evidence
+        if: steps.deploy.outputs.quota_blocked == 'true'
+        run: |
+          echo "PREBUILT_PREVIEW_BUILD=PASS"
+          echo "PREBUILT_PREVIEW_RUNTIME=NOT_RUN reason=api-deployments-free-per-day"
+          {
+            echo "## Prebuilt Preview proof"
+            echo ""
+            echo "- Build in GitHub Actions: **PASS**"
+            echo "- .vercel/output generated: **PASS**"
+            echo "- Deployment creation: **BLOCKED by Vercel Free daily deployment quota**"
+            echo "- Runtime validation: not run because no new deployment can be created"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-production-from-issue:
     if: >-
@@ -204,15 +243,30 @@ jobs:
         run: vercel pull --yes --environment=production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Build Production artifacts in GitHub Actions
-        run: vercel build --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+        run: |
+          vercel build --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+          test -f .vercel/output/config.json
+          echo "PREBUILT_PRODUCTION_BUILD=PASS"
 
       - name: Deploy prebuilt Production artifacts
         id: deploy
         shell: bash
         run: |
-          url=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          set +e
+          output=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            if printf '%s\n' "$output" | grep -Fq 'api-deployments-free-per-day'; then
+              echo "PREBUILT_PRODUCTION_DEPLOYMENT=BLOCKED quota=api-deployments-free-per-day"
+            fi
+            exit "$status"
+          fi
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | tail -n 1)
+          test -n "$url"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "PREBUILT_PRODUCTION_DEPLOYMENT=$url"
+          echo "PREBUILT_PRODUCTION_DEPLOYMENT=PASS url=$url"
 
       - name: Verify official Production alias targets this deployment
         shell: bash
@@ -362,9 +416,22 @@ jobs:
         shell: bash
         run: |
           vercel build --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
-          url=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          test -f .vercel/output/config.json
+          set +e
+          output=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            if printf '%s\n' "$output" | grep -Fq 'api-deployments-free-per-day'; then
+              echo "PREBUILT_PRODUCTION_DEPLOYMENT=BLOCKED quota=api-deployments-free-per-day"
+            fi
+            exit "$status"
+          fi
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | tail -n 1)
+          test -n "$url"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "PREBUILT_PRODUCTION_DEPLOYMENT=$url"
+          echo "PREBUILT_PRODUCTION_DEPLOYMENT=PASS url=$url"
 
       - name: Verify Production runtime and smoke
         shell: bash
