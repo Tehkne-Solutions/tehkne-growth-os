@@ -6,9 +6,9 @@ Plataforma multiempresa de Growth Operations para aquisição, marketing, dados,
 
 ## Estado
 
-O projeto está em **Release Candidate 1 (INT-41)**. O Core, Growth Intelligence, Human Decision Loop, governança de playbooks, conectores Google Ads/Meta Ads, HubSpot CRM, full-funnel, attribution, scheduler/control plane, observabilidade e hardening de segurança já estão implementados e cobertos pelo CI.
+O projeto está em **Production Candidate Core 1.0.0-rc.1**. O núcleo de plataforma, Growth Intelligence, Human Decision Loop, governança de playbooks, runtimes de conectores Google Ads/Meta Ads, HubSpot CRM, full-funnel, attribution, scheduler/control plane, observabilidade, vault e hardening de segurança estão implementados e cobertos pelo CI.
 
-A validação final de produção exige deployment publicado, first-sync real dos conectores configurados, smoke do ambiente, execução do scheduler e evidência do golden path completo.
+A certificação do **Core** é separada da certificação dos providers. Google Ads, Meta Ads e HubSpot permanecem `PENDING_EXTERNAL` até existirem credenciais reais, conta selecionada e first-sync verificado. Nenhum mock ou placeholder promove provider para certificado.
 
 ## Capacidades atuais
 
@@ -24,7 +24,7 @@ A validação final de produção exige deployment publicado, first-sync real do
 - atribuição privacy-safe com níveis de confiança, revisão humana e campaign revenue;
 - scheduler unificado mídia+CRM com locks, retry/backoff e budgets;
 - Connector Operations, health, alerts e notificações operacionais;
-- production readiness, security audit e Release Candidate smoke gate.
+- production readiness, security audit, Release Capability Matrix e smoke gates de RC/Core.
 
 ## Sector Packs
 
@@ -60,7 +60,7 @@ npm run ci
 
 O pipeline executa Prisma validate/generate, audit de dependências de produção, lint, typecheck, testes e build Next.js.
 
-Para validar um ambiente publicado:
+Para validar um ambiente publicado com o gate geral do RC:
 
 ```bash
 GROWTH_OS_BASE_URL=https://... \
@@ -69,7 +69,17 @@ WORKSPACE_ID=... \
 npm run smoke:rc
 ```
 
-O protocolo completo do RC está em `docs/releases/RC-1.md`.
+Para certificar especificamente o Production Candidate Core:
+
+```bash
+GROWTH_OS_BASE_URL=https://tehkne-growth-os.vercel.app \
+CRON_SECRET=... \
+RC_WORKSPACE_ID=93000000-0000-4000-8000-000000000001 \
+EXPECTED_RELEASE_SHA=<main-sha> \
+npm run smoke:core-cert
+```
+
+O protocolo geral do RC está em `docs/releases/RC-1.md` e a fronteira de certificação do Core em `docs/releases/PRODUCTION-CANDIDATE-CORE-1.0.0-rc.1.md`.
 
 ## Estrutura
 
@@ -78,26 +88,4 @@ src/
 ├── app/                    # rotas e composição da interface
 ├── modules/                # domínios independentes do monólito
 └── shared/                 # infraestrutura e contratos compartilhados
-prisma/                     # schema e migrações PostgreSQL
-sector-packs/               # pacotes setoriais versionados
-tests/                      # testes unitários, arquitetura, tenancy e integração
-docs/                       # ADRs, operação e releases
 ```
-
-## Princípios de segurança
-
-- nenhuma pessoa entra automaticamente em um workspace existente;
-- todo acesso de negócio começa por contexto de tenant autorizado;
-- IDs de recurso isolados não são autorização;
-- segredos nunca são persistidos em tabelas de domínio ou logs;
-- tokens de providers ficam somente no vault criptografado/secret providers;
-- alterações críticas geram auditoria;
-- conectores de mídia permanecem read-only;
-- atribuição não presume causalidade sem evidência explícita;
-- high/critical production dependency findings bloqueiam release.
-
-## Release Candidate
-
-O RC-1 só recebe **GO** quando CI, security audit, first-sync, scheduler, production readiness, segurança HTTP e golden path real estiverem comprovados. O workflow manual `Release Candidate Deploy` automatiza o deploy Vercel e executa `smoke:rc` contra a URL criada.
-
-Copyright © 2026 Tehkné Solutions. Todos os direitos reservados.
