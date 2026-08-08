@@ -55,9 +55,7 @@ jobs:
             exit 0
           fi
           set +e
-          response=$(vercel curl /api/internal/rc-workspace \
-            --scope "$VERCEL_SCOPE" \
-            --token "$VERCEL_TOKEN" \
+          response=$(vercel --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" curl /api/internal/rc-workspace \
             -- \
             --silent \
             --show-error \
