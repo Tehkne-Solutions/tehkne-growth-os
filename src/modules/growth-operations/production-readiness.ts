@@ -1,4 +1,5 @@
 import type { DatabaseClient } from "@/shared/db/client";
+import { resolveApplicationUrl } from "@/shared/config/env";
 
 export type ProductionReadinessCheck = Readonly<{
   key: string;
@@ -64,12 +65,18 @@ export async function auditProductionReadiness(
   const schedulerAgeMinutes = latestScheduler
     ? Math.max(0, (now.getTime() - latestScheduler.startedAt.getTime()) / 60_000)
     : null;
+  const applicationUrl = resolveApplicationUrl(environment);
 
   const checks: ProductionReadinessCheck[] = [
     envCheck("session", "Sessão de produção", Boolean(environment.SESSION_SECRET), "SESSION_SECRET"),
     envCheck("vault", "Vault criptografado", Boolean(environment.CONNECTOR_SECRET_MASTER_KEY), "CONNECTOR_SECRET_MASTER_KEY"),
     envCheck("scheduler-secret", "Autenticação do scheduler", Boolean(environment.CRON_SECRET), "CRON_SECRET"),
-    envCheck("app-url", "URL pública", Boolean(environment.APP_URL), "APP_URL"),
+    envCheck(
+      "app-url",
+      "URL pública",
+      Boolean(applicationUrl),
+      "APP_URL ou VERCEL_PROJECT_PRODUCTION_URL",
+    ),
     {
       key: "paid-first-sync",
       label: "Primeira sincronização de mídia",
