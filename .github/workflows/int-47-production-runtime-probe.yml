@@ -17,7 +17,6 @@ jobs:
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
-      WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,11 +31,24 @@ jobs:
         run: |
           response=$(vercel curl /api/internal/schema-readiness -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
           printf 'SCHEMA_RESPONSE=%s\n' "$response"
-      - name: Probe RC workspace
+      - name: Resolve RC workspace from Production runtime
+        id: workspace
         shell: bash
         run: |
           response=$(vercel curl /api/internal/rc-workspace -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
           printf 'WORKSPACE_RESPONSE=%s\n' "$response"
+          workspace_id=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const parsed = JSON.parse(body);
+              if (parsed.status !== "ready" || typeof parsed.workspaceId !== "string") process.exit(2);
+              process.stdout.write(parsed.workspaceId);
+            });
+          ')
+          echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
+          echo "RC_WORKSPACE_RUNTIME=READY workspace_id=$workspace_id"
       - name: Resolve current Production deployment URL
         id: production
         shell: bash
