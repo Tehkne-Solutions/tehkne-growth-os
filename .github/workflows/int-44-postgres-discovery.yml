@@ -16,6 +16,7 @@ jobs:
       VERCEL_SCOPE: tehkne-solutions-projects
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
       - name: Checkout
@@ -38,6 +39,34 @@ jobs:
 
       - name: Link canonical project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: List current production deployments
+        shell: bash
+        run: |
+          echo "PRODUCTION_DEPLOYMENTS_BEGIN"
+          vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "PRODUCTION_DEPLOYMENTS_END"
+
+      - name: Probe production RC workspace runtime
+        shell: bash
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "RC_RUNTIME_PROBE=SKIPPED missing=CRON_SECRET"
+            exit 0
+          fi
+          set +e
+          response=$(vercel curl /api/internal/rc-workspace \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          echo "RC_RUNTIME_PROBE_EXIT=$status"
 
       - name: List existing marketplace resources
         shell: bash
@@ -94,19 +123,3 @@ jobs:
           echo "POSTGRES_DISCOVERY_PREVIEW_ENV_BEGIN"
           vercel env ls preview --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
           echo "POSTGRES_DISCOVERY_PREVIEW_ENV_END"
-
-      - name: Confirm environment remains unchanged
-        shell: bash
-        run: |
-          set +e
-          output=$(vercel env run -e production -- bash -lc '
-            if [ -n "$DATABASE_URL" ]; then
-              echo "DATABASE_URL=configured"
-            else
-              echo "DATABASE_URL=missing"
-            fi
-          ')
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-          exit "$status"
