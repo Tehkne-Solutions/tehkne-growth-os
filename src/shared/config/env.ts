@@ -21,20 +21,23 @@ const serverEnvironmentSchema = z
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
 
-type ApplicationUrlEnvironment = Readonly<{
-  APP_URL?: string;
-  VERCEL_PROJECT_PRODUCTION_URL?: string;
-  VERCEL_URL?: string;
-}>;
+type ApplicationUrlKey =
+  | "APP_URL"
+  | "VERCEL_PROJECT_PRODUCTION_URL"
+  | "VERCEL_URL";
 
-export function resolveApplicationUrl(input: ApplicationUrlEnvironment): string | undefined {
-  const explicit = input.APP_URL?.trim();
+export function resolveApplicationUrl(input: object): string | undefined {
+  const environment = input as Partial<Record<ApplicationUrlKey, unknown>>;
+
+  const explicit = readEnvironmentString(environment.APP_URL);
   if (explicit) return explicit;
 
-  const productionDomain = input.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const productionDomain = readEnvironmentString(
+    environment.VERCEL_PROJECT_PRODUCTION_URL,
+  );
   if (productionDomain) return normalizeHttpsUrl(productionDomain);
 
-  const deploymentDomain = input.VERCEL_URL?.trim();
+  const deploymentDomain = readEnvironmentString(environment.VERCEL_URL);
   if (deploymentDomain) return normalizeHttpsUrl(deploymentDomain);
 
   return undefined;
@@ -55,6 +58,12 @@ export function requireSessionSecret(environment: ServerEnvironment): string {
   }
 
   return environment.SESSION_SECRET;
+}
+
+function readEnvironmentString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
 }
 
 function normalizeHttpsUrl(value: string): string {
