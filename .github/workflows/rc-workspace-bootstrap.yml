@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - "src/modules/growth-operations/rc-workspace.ts"
+      - "src/modules/growth-operations/schema-readiness.ts"
       - "src/app/api/internal/rc-workspace/route.ts"
+      - "src/app/api/internal/schema-readiness/route.ts"
       - "scripts/rc-workspace-*.sql"
       - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
@@ -14,8 +16,11 @@ on:
   pull_request:
     paths:
       - "src/modules/growth-operations/rc-workspace.ts"
+      - "src/modules/growth-operations/schema-readiness.ts"
       - "src/app/api/internal/rc-workspace/route.ts"
+      - "src/app/api/internal/schema-readiness/route.ts"
       - "tests/integration/rc-workspace-postgres.test.ts"
+      - "tests/integration/schema-readiness-postgres.test.ts"
       - "scripts/rc-workspace-*.sql"
       - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
@@ -23,6 +28,8 @@ on:
       - "docs/releases/RC-1.md"
   issues:
     types: [opened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -30,7 +37,7 @@ permissions:
   statuses: write
 
 concurrency:
-  group: rc-workspace-bootstrap-${{ github.event_name == 'issues' && 'production-apply' || github.ref }}
+  group: rc-workspace-bootstrap-${{ contains(fromJSON('["issues","issue_comment"]'), github.event_name) && 'production-apply' || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -119,10 +126,15 @@ jobs:
   apply-production:
     needs: validate-sql
     if: >-
-      github.event_name == 'issues' &&
-      github.event.action == 'opened' &&
-      github.event.issue.title == '[RC] APPLY_RC_WORKSPACE_PRODUCTION' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+      (github.event_name == 'issues' &&
+       github.event.action == 'opened' &&
+       github.event.issue.title == '[RC] APPLY_RC_WORKSPACE_PRODUCTION' &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.action == 'created' &&
+       github.event.issue.title == '[RC] APPLY_RC_WORKSPACE_PRODUCTION' &&
+       github.event.comment.body == '/apply-rc-workspace-production' &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -159,14 +171,43 @@ jobs:
       - name: Link canonical Vercel project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
+      - name: Verify production schema readiness
+        shell: bash
+        run: |
+          set +e
+          response=$(vercel curl /api/internal/schema-readiness \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          if [ "$status" -ne 0 ]; then
+            echo "RC_WORKSPACE_APPLY=BLOCKED schema_probe_unavailable"
+            exit "$status"
+          fi
+
+          schema_ready=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const parsed = JSON.parse(body);
+              process.stdout.write(parsed.schemaReady === true ? "true" : "false");
+            });
+          ')
+          if [ "$schema_ready" != "true" ]; then
+            echo "RC_WORKSPACE_APPLY=BLOCKED production_schema_not_ready"
+            exit 3
+          fi
+
       - name: Inspect current production RC workspace
         id: before
         shell: bash
         run: |
           set +e
           response=$(vercel curl /api/internal/rc-workspace \
-            --scope "$VERCEL_SCOPE" \
-            --token "$VERCEL_TOKEN" \
             -- \
             --silent \
             --show-error \
@@ -205,8 +246,6 @@ jobs:
         shell: bash
         run: |
           response=$(vercel curl /api/internal/rc-workspace \
-            --scope "$VERCEL_SCOPE" \
-            --token "$VERCEL_TOKEN" \
             -- \
             --silent \
             --show-error \
@@ -222,8 +261,6 @@ jobs:
         shell: bash
         run: |
           response=$(vercel curl /api/internal/rc-workspace \
-            --scope "$VERCEL_SCOPE" \
-            --token "$VERCEL_TOKEN" \
             -- \
             --silent \
             --show-error \
