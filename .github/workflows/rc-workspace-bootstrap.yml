@@ -1,0 +1,265 @@
+name: RC Workspace Bootstrap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/rc-workspace-*.sql"
+      - ".github/workflows/rc-workspace-bootstrap.yml"
+      - ".github/workflows/release-candidate-deploy.yml"
+      - "docs/releases/RC-1.md"
+  pull_request:
+    paths:
+      - "scripts/rc-workspace-*.sql"
+      - ".github/workflows/rc-workspace-bootstrap.yml"
+      - ".github/workflows/release-candidate-deploy.yml"
+      - "docs/releases/RC-1.md"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Vercel environment to inspect or bootstrap
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+      mode:
+        description: Read-only inspection or idempotent workspace bootstrap
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - apply
+      confirmation:
+        description: Required only for apply. Use APPLY_RC_WORKSPACE_PREVIEW or APPLY_RC_WORKSPACE_PRODUCTION.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
+  cancel-in-progress: false
+
+jobs:
+  validate-sql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: growth_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d growth_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/growth_os?schema=public
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:migrate:deploy
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Inspect empty RC state
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
+
+      - name: Apply bootstrap twice to prove idempotency
+        shell: bash
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+
+      - name: Verify tenant hierarchy and audit evidence
+        shell: bash
+        run: |
+          workspace_count=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+            SELECT COUNT(*)
+            FROM workspaces w
+            JOIN client_organizations c ON c.id = w.client_organization_id
+            JOIN operator_organizations o ON o.id = w.operator_organization_id
+            WHERE o.slug = 'tehkne-solutions'
+              AND c.slug = 'tkn-growth-rc'
+              AND w.slug = 'rc-validation';
+          ")
+          audit_count=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+            SELECT COUNT(*)
+            FROM audit_events
+            WHERE action = 'rc.workspace.bootstrap'
+              AND resource_type = 'workspace';
+          ")
+
+          test "$workspace_count" = "1"
+          test "$audit_count" = "1"
+          echo "RC_WORKSPACE_SQL=PASS workspace_count=$workspace_count audit_count=$audit_count"
+
+  inspect-or-bootstrap:
+    needs: validate-sql
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
+      REQUESTED_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'inspect' }}
+      CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify Vercel credential
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "RC_WORKSPACE=BLOCKED missing=VERCEL_TOKEN"
+            exit 2
+          fi
+
+      - name: Guard mutation mode
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ "$REQUESTED_MODE" != "inspect" ]; then
+            echo "RC_WORKSPACE=BLOCKED automatic_events_are_read_only"
+            exit 2
+          fi
+
+          if [ "$REQUESTED_MODE" = "apply" ]; then
+            expected="APPLY_RC_WORKSPACE_PREVIEW"
+            if [ "$TARGET_ENV" = "production" ]; then
+              expected="APPLY_RC_WORKSPACE_PRODUCTION"
+            fi
+            if [ "$CONFIRMATION" != "$expected" ]; then
+              echo "RC_WORKSPACE=BLOCKED invalid_confirmation target=$TARGET_ENV"
+              exit 2
+            fi
+          fi
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Link Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Inspect RC workspace state
+        id: environment
+        shell: bash
+        run: |
+          set +e
+          vercel env run -e "$TARGET_ENV" -- bash -lc '
+            if [ -z "$DATABASE_URL" ]; then
+              echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED missing=DATABASE_URL"
+              exit 3
+            fi
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
+          '
+          status=$?
+          set -e
+
+          if [ "$status" -eq 3 ]; then
+            echo "database_ready=false" >> "$GITHUB_OUTPUT"
+            echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED environment=$TARGET_ENV"
+            if [ "$REQUESTED_MODE" = "apply" ]; then
+              echo "RC_WORKSPACE=BLOCKED cannot_apply_without_DATABASE_URL"
+              exit 2
+            fi
+            exit 0
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            echo "RC_WORKSPACE=FAILED inspection_exit=$status"
+            exit "$status"
+          fi
+
+          echo "database_ready=true" >> "$GITHUB_OUTPUT"
+          echo "RC_WORKSPACE_ENVIRONMENT=READY environment=$TARGET_ENV"
+
+      - name: Apply RC workspace bootstrap
+        if: env.REQUESTED_MODE == 'apply' && steps.environment.outputs.database_ready == 'true'
+        shell: bash
+        run: |
+          vercel env run -e "$TARGET_ENV" -- bash -lc '
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+          '
+
+      - name: Verify resolved RC workspace
+        if: steps.environment.outputs.database_ready == 'true'
+        id: workspace
+        shell: bash
+        run: |
+          workspace_id=$(vercel env run -e "$TARGET_ENV" -- bash -lc '
+            psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+              SELECT w.id::text
+              FROM workspaces w
+              JOIN client_organizations c ON c.id = w.client_organization_id
+              JOIN operator_organizations o ON o.id = w.operator_organization_id
+              WHERE o.slug = '\''tehkne-solutions'\''
+                AND c.slug = '\''tkn-growth-rc'\''
+                AND w.slug = '\''rc-validation'\''
+                AND w.status = '\''ACTIVE'\''
+              LIMIT 1;
+            "
+          ' | tail -n 1 | tr -d '\r')
+
+          if [ -z "$workspace_id" ]; then
+            echo "RC_WORKSPACE_STATUS=missing"
+          else
+            echo "RC_WORKSPACE_STATUS=ready"
+            echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish bootstrap summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Tehkné Growth OS RC workspace"
+            echo ""
+            echo "- Environment: $TARGET_ENV"
+            echo "- Mode: $REQUESTED_MODE"
+            echo "- Database configured: ${{ steps.environment.outputs.database_ready || 'unknown' }}"
+            echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
