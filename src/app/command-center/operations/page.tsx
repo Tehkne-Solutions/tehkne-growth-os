@@ -31,6 +31,7 @@ type State =
       setupHref: string;
       commandCenterHref: string;
       clientOperationsHref: string;
+      portfolioHref: string;
     };
 
 export default async function OperationalConsolePage({ searchParams }: PageProps) {
@@ -51,7 +52,7 @@ export default async function OperationalConsolePage({ searchParams }: PageProps
     <main className={styles.page}>
       <nav className={styles.nav}>
         <div><span className={styles.brandMark} />Tehkné Growth OS</div>
-        <div className={styles.links}><a href={state.commandCenterHref}>Command Center</a><a href={state.clientOperationsHref}>Client Operations</a><a href={state.setupHref}>Setup</a></div>
+        <div className={styles.links}><a href={state.portfolioHref}>Portfolio</a><a href={state.commandCenterHref}>Command Center</a><a href={state.clientOperationsHref}>Client Operations</a><a href={state.setupHref}>Setup</a></div>
       </nav>
 
       <header className={styles.hero}>
@@ -149,6 +150,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
       setupHref: `/command-center/setup?${query.toString()}`,
       commandCenterHref: `/command-center?${query.toString()}`,
       clientOperationsHref: `/command-center/client-operations?${query.toString()}`,
+      portfolioHref: `/command-center/portfolio?operatorOrganizationId=${encodeURIComponent(operatorOrganizationId)}`,
     };
   } catch (error) {
     if (error instanceof InvalidSessionError) return { kind: "authentication-required" };
