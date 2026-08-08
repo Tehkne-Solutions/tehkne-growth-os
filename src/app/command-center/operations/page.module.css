@@ -1,0 +1,73 @@
+.page {
+  min-height: 100vh;
+  padding: 28px;
+  background: #f4f6f8;
+  color: #17202a;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.nav, .hero, .kpis, .panel, .twoColumns, .footer { max-width: 1240px; margin-left: auto; margin-right: auto; }
+.nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; font-weight: 700; }
+.nav > div:first-child { display: flex; gap: 10px; align-items: center; }
+.brandMark { width: 12px; height: 12px; border-radius: 3px; background: #111827; display: inline-block; }
+.links { display: flex; gap: 16px; }
+.links a { color: inherit; text-decoration: none; }
+.hero { display: grid; grid-template-columns: 1.5fr .7fr; gap: 24px; align-items: stretch; margin-bottom: 20px; }
+.hero > div:first-child, .releaseCard, .panel, .kpis article, .state { background: #fff; border: 1px solid #dde3ea; border-radius: 18px; }
+.hero > div:first-child { padding: 34px; }
+.hero h1 { margin: 8px 0 12px; font-size: clamp(32px, 5vw, 54px); line-height: .98; max-width: 900px; }
+.hero p { max-width: 780px; line-height: 1.6; color: #586577; }
+.eyebrow { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #657181; }
+.releaseCard { padding: 28px; display: flex; flex-direction: column; justify-content: flex-end; min-height: 220px; }
+.releaseCard span, .releaseCard small { color: #657181; }
+.releaseCard strong { font-size: 28px; margin: 10px 0; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.kpis article { padding: 20px; }
+.kpis span { display: block; font-size: 12px; text-transform: uppercase; color: #6b7280; margin-bottom: 8px; }
+.kpis strong { font-size: 22px; }
+.panel { padding: 26px; margin-bottom: 20px; }
+.sectionHeader { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 18px; }
+.sectionHeader h2 { margin: 5px 0 0; }
+.sectionHeader > span { font-size: 12px; font-weight: 800; padding: 7px 10px; border: 1px solid #d7dee7; border-radius: 999px; }
+.runtimeGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 0; }
+.runtimeGrid div { padding: 16px; border: 1px solid #e4e8ee; border-radius: 12px; }
+.runtimeGrid dt { font-size: 12px; color: #697586; text-transform: uppercase; margin-bottom: 6px; }
+.runtimeGrid dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.mono { font-family: Consolas, Monaco, monospace; font-size: 13px; }
+.capabilityGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.capabilityCard { border: 1px solid #e1e6ec; border-radius: 14px; padding: 18px; min-height: 180px; }
+.capabilityCard > div { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; font-weight: 800; }
+.capabilityCard h3 { margin: 22px 0 10px; }
+.capabilityCard p { color: #627083; line-height: 1.45; font-size: 14px; }
+.capabilityCard[data-state="CERTIFIED"] { border-color: #9dd6b5; }
+.capabilityCard[data-state="PENDING_EXTERNAL"] { border-color: #e7c98d; }
+.capabilityCard[data-state="BLOCKED"] { border-color: #e3a1a1; }
+.twoColumns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.twoColumns .panel { margin-bottom: 0; }
+.alertList, .actionList { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.alertList li, .actionList li { border: 1px solid #e4e8ee; border-radius: 12px; padding: 14px; }
+.alertList li strong, .alertList li span { display: block; }
+.alertList li span { color: #657181; margin-top: 5px; line-height: 1.4; }
+.alertList li[data-severity="critical"] { border-color: #e3a1a1; }
+.alertList li[data-severity="warning"] { border-color: #e7c98d; }
+.alertList li[data-severity="info"] { border-color: #b8c8df; }
+.actionList { counter-reset: item; }
+.actionList li { list-style: decimal inside; line-height: 1.45; }
+.ok { color: #25643e; font-weight: 700; }
+.footer { display: flex; justify-content: space-between; padding: 30px 4px 10px; color: #667386; font-size: 12px; }
+.state { max-width: 760px; margin: 14vh auto 0; padding: 36px; }
+.state h1 { font-size: 40px; margin: 8px 0 10px; }
+.state span { color: #667386; }
+
+@media (max-width: 980px) {
+  .hero, .twoColumns { grid-template-columns: 1fr; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .capabilityGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .page { padding: 16px; }
+  .nav, .sectionHeader, .footer { flex-direction: column; align-items: flex-start; }
+  .kpis, .runtimeGrid, .capabilityGrid { grid-template-columns: 1fr; }
+  .hero > div:first-child, .releaseCard, .panel { padding: 20px; }
+}
