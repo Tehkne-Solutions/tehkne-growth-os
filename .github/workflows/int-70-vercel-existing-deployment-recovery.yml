@@ -1,0 +1,77 @@
+name: INT-70 Vercel Existing Deployment Recovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-70-vercel-existing-deployment-recovery.yml"
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_SCOPE: tehkne-solutions-projects
+  VERCEL_PROJECT_NAME: tehkne-growth-os
+
+jobs:
+  inspect-existing-deployments:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Require Vercel credential
+        run: test -n "$VERCEL_TOKEN"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Search exact candidate SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=(
+            "d8608468c0e3c910f36a3bcbc1d4336e28f04953"
+            "4f52b140b094e7d0050e37c4f37351ce91e761fd"
+            "5f68babe89a8e6c53a3dc6132b973637ea8c8528"
+            "017ee8be1e77a0950faaa9cad665916226bcc60d"
+            "b82961df90d8462ffcb68ca54962c3e45f562a66"
+          )
+          for sha in "${candidates[@]}"; do
+            echo "===== githubCommitSha=$sha ====="
+            vercel ls "$VERCEL_PROJECT_NAME" \
+              --meta "githubCommitSha=$sha" \
+              --scope "$VERCEL_SCOPE" \
+              --token "$VERCEL_TOKEN" || true
+          done
+
+      - name: List recent READY deployments
+        shell: bash
+        run: |
+          echo "===== recent READY deployments ====="
+          vercel ls "$VERCEL_PROJECT_NAME" \
+            --status READY \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN"
+
+      - name: Record read-only recovery evidence
+        run: |
+          {
+            echo "## INT-70 existing deployment recovery"
+            echo ""
+            echo "- Operation: read-only Vercel deployment inventory"
+            echo "- No deployment created"
+            echo "- No alias changed"
+            echo "- No Production mutation"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
