@@ -1,3 +1,8 @@
+import {
+  inspectPlatformConnectorSecrets,
+  platformConnectorSecretRefsFromEnvironment,
+  type PlatformConnectorSecretStatus,
+} from "@/modules/growth-onboarding/platform-connector-secrets";
 import type { DatabaseClient } from "@/shared/db/client";
 
 export type ProviderReadiness = Readonly<{
@@ -24,6 +29,12 @@ export type UnifiedOnboardingReadiness = Readonly<{
 }>;
 
 type Counts = { total: number; active: number; verified: number };
+
+const NO_PLATFORM_SECRETS: PlatformConnectorSecretStatus = Object.freeze({
+  googleAdsDeveloperToken: false,
+  googleAdsOAuthClient: false,
+  metaAdsOAuthClient: false,
+});
 
 export async function loadUnifiedOnboardingReadiness(
   database: DatabaseClient,
@@ -60,17 +71,31 @@ export async function loadUnifiedOnboardingReadiness(
   const counts = new Map<string, Counts>();
   for (const row of [...paidRows, ...crmRows]) counts.set(row.provider, row);
 
-  const masterKeyReady = Boolean(environment.CONNECTOR_SECRET_MASTER_KEY);
+  const masterKey = environment.CONNECTOR_SECRET_MASTER_KEY;
+  const masterKeyReady = Boolean(masterKey);
+  let platformSecrets = NO_PLATFORM_SECRETS;
+  if (masterKey) {
+    try {
+      platformSecrets = await inspectPlatformConnectorSecrets(
+        database,
+        masterKey,
+        platformConnectorSecretRefsFromEnvironment(environment),
+      );
+    } catch {
+      platformSecrets = NO_PLATFORM_SECRETS;
+    }
+  }
+
   const googleMissing = missing([
     [masterKeyReady, "CONNECTOR_SECRET_MASTER_KEY"],
     [Boolean(environment.GOOGLE_ADS_API_VERSION), "GOOGLE_ADS_API_VERSION"],
-    [Boolean(environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF), "GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF"],
-    [Boolean(environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF), "GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF"],
+    [platformSecrets.googleAdsDeveloperToken, "Google Ads Developer Token (vault)"],
+    [platformSecrets.googleAdsOAuthClient, "Google OAuth Client (vault)"],
   ]);
   const metaMissing = missing([
     [masterKeyReady, "CONNECTOR_SECRET_MASTER_KEY"],
     [Boolean(environment.META_GRAPH_API_VERSION), "META_GRAPH_API_VERSION"],
-    [Boolean(environment.META_ADS_OAUTH_CLIENT_SECRET_REF), "META_ADS_OAUTH_CLIENT_SECRET_REF"],
+    [platformSecrets.metaAdsOAuthClient, "Meta OAuth Client (vault)"],
   ]);
   const hubspotMissing = missing([
     [masterKeyReady, "CONNECTOR_SECRET_MASTER_KEY"],
