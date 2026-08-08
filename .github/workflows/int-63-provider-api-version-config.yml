@@ -33,10 +33,6 @@ jobs:
       - name: Link canonical Vercel project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" >/dev/null
 
-      - name: Verify non-sensitive CLI mode exists
-        shell: bash
-        run: vercel env add --help | grep -q -- '--no-sensitive'
-
       - name: Fail-closed preflight — versions must still be absent
         shell: bash
         run: |
@@ -71,7 +67,6 @@ jobs:
         shell: bash
         run: |
           printf '%s' "$GOOGLE_ADS_API_VERSION_VALUE" | vercel env add GOOGLE_ADS_API_VERSION production \
-            --no-sensitive \
             --scope "$VERCEL_SCOPE" \
             --token "$VERCEL_TOKEN"
           echo "RC_PROVIDER_VERSION GOOGLE_ADS_API_VERSION=configured value=$GOOGLE_ADS_API_VERSION_VALUE"
@@ -80,7 +75,6 @@ jobs:
         shell: bash
         run: |
           printf '%s' "$META_GRAPH_API_VERSION_VALUE" | vercel env add META_GRAPH_API_VERSION production \
-            --no-sensitive \
             --scope "$VERCEL_SCOPE" \
             --token "$VERCEL_TOKEN"
           echo "RC_PROVIDER_VERSION META_GRAPH_API_VERSION=configured value=$META_GRAPH_API_VERSION_VALUE"
