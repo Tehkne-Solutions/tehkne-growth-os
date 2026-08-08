@@ -41,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
@@ -266,3 +267,50 @@ jobs:
             echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish production inspection commit status
+        if: always() && github.event_name == 'push'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          DATABASE_READY: ${{ steps.environment.outputs.database_ready }}
+          RESOLVED_WORKSPACE: ${{ steps.workspace.outputs.workspace_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          state="pending"
+          description="Production database/workspace inspection pending"
+
+          if [ "$JOB_STATUS" = "failure" ]; then
+            state="failure"
+            description="Production RC workspace inspection failed"
+          elif [ "$DATABASE_READY" != "true" ]; then
+            state="pending"
+            description="Production DATABASE_URL is not configured"
+          elif [ -n "$RESOLVED_WORKSPACE" ]; then
+            state="success"
+            description="Production RC workspace is ready"
+          else
+            state="pending"
+            description="Production database ready; RC workspace missing"
+          fi
+
+          export state description
+          python - <<'PY' > /tmp/rc-workspace-status.json
+          import json
+          import os
+          print(json.dumps({
+              "state": os.environ["state"],
+              "context": "TKN RC Workspace/Production",
+              "description": os.environ["description"],
+              "target_url": os.environ["RUN_URL"],
+          }))
+          PY
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data-binary @/tmp/rc-workspace-status.json \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"
