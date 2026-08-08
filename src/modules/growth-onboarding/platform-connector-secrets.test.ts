@@ -86,12 +86,14 @@ describe("platform connector secret references", () => {
       googleAdsOAuthClient: "growth-connectors/platform/google-ads/oauth-client",
       metaAdsOAuthClient: "growth-connectors/platform/meta-ads/oauth-client",
     });
-    expect(platformConnectorSecretRefsFromEnvironment({} as NodeJS.ProcessEnv))
-      .toEqual(PLATFORM_CONNECTOR_SECRET_REFS);
+    expect(platformConnectorSecretRefsFromEnvironment({
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv)).toEqual(PLATFORM_CONNECTOR_SECRET_REFS);
   });
 
   it("honors deployment-controlled ref overrides without accepting caller refs", () => {
     expect(platformConnectorSecretRefsFromEnvironment({
+      NODE_ENV: "test",
       GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF: "custom/google/developer",
       GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF: "custom/google/oauth",
       META_ADS_OAUTH_CLIENT_SECRET_REF: "custom/meta/oauth",
