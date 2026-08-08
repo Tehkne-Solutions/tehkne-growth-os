@@ -46,6 +46,13 @@ jobs:
           vercel integration list --all --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
           echo "POSTGRES_DISCOVERY_RESOURCES_END"
 
+      - name: List current project resources
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_PROJECT_RESOURCES_BEGIN"
+          vercel integration list "$VERCEL_PROJECT_NAME" --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_PROJECT_RESOURCES_END"
+
       - name: List Neon installations
         shell: bash
         run: |
@@ -66,6 +73,27 @@ jobs:
           echo "POSTGRES_DISCOVERY_NEON_HELP_BEGIN"
           vercel integration add neon --help
           echo "POSTGRES_DISCOVERY_NEON_HELP_END"
+
+      - name: Inspect existing resource connection contract
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_CONNECT_HELP_BEGIN"
+          vercel integration resource connect --help
+          echo "POSTGRES_DISCOVERY_CONNECT_HELP_END"
+
+      - name: List production environment variable names
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_PRODUCTION_ENV_BEGIN"
+          vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_PRODUCTION_ENV_END"
+
+      - name: List preview environment variable names
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_PREVIEW_ENV_BEGIN"
+          vercel env ls preview --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_PREVIEW_ENV_END"
 
       - name: Confirm environment remains unchanged
         shell: bash
