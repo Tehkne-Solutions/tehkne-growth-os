@@ -18,6 +18,7 @@ import {
 import {
   canManagePlatformConnectorSecrets,
   inspectPlatformConnectorSecrets,
+  platformConnectorSecretRefsFromEnvironment,
   type PlatformConnectorSecretStatus,
 } from "@/modules/growth-onboarding/platform-connector-secrets";
 import { auditProductionReadiness } from "@/modules/growth-operations/production-readiness";
@@ -188,6 +189,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
         platformSecretStatus = await inspectPlatformConnectorSecrets(
           database,
           process.env.CONNECTOR_SECRET_MASTER_KEY,
+          platformConnectorSecretRefsFromEnvironment(process.env),
         );
       } catch {
         platformSecretStatus = null;
