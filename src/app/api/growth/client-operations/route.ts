@@ -76,15 +76,15 @@ export async function POST(request: Request) {
           {
             userId: session.userId,
             tenant,
-            primaryBusinessObjective: body.primaryBusinessObjective,
-            northStarMetricId: body.northStarMetricId,
             financialCurrency: body.financialCurrency,
-            averageTicket: body.averageTicket,
-            monthlyMediaBudget: body.monthlyMediaBudget,
-            salesCycleDays: body.salesCycleDays,
-            capacityNotes: body.capacityNotes,
-            seasonalityNotes: body.seasonalityNotes,
-            handoverSource: body.handoverSource,
+            ...(body.primaryBusinessObjective === undefined ? {} : { primaryBusinessObjective: body.primaryBusinessObjective }),
+            ...(body.northStarMetricId === undefined ? {} : { northStarMetricId: body.northStarMetricId }),
+            ...(body.averageTicket === undefined ? {} : { averageTicket: body.averageTicket }),
+            ...(body.monthlyMediaBudget === undefined ? {} : { monthlyMediaBudget: body.monthlyMediaBudget }),
+            ...(body.salesCycleDays === undefined ? {} : { salesCycleDays: body.salesCycleDays }),
+            ...(body.capacityNotes === undefined ? {} : { capacityNotes: body.capacityNotes }),
+            ...(body.seasonalityNotes === undefined ? {} : { seasonalityNotes: body.seasonalityNotes }),
+            ...(body.handoverSource === undefined ? {} : { handoverSource: body.handoverSource }),
           },
         )
       : await transitionClientLifecycle(
