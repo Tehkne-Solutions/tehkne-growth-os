@@ -6,6 +6,10 @@ import {
   type ClientOperationsSnapshot,
 } from "@/modules/client-operations/client-profile";
 import {
+  loadAuthorizedClientHandoverChecklist,
+  type ClientHandoverChecklist,
+} from "@/modules/client-operations/handover-checklist";
+import {
   AuthorizationDeniedError,
   InvalidSessionError,
   PrismaIdentityRepository,
@@ -17,6 +21,7 @@ import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/en
 import { getDatabase } from "@/shared/db/client";
 
 import { ClientOperationsForm } from "./client-operations-form";
+import { HandoverChecklist } from "./handover-checklist";
 import styles from "./client-operations.module.css";
 
 type SearchValue = string | string[] | undefined;
@@ -32,6 +37,7 @@ type PageState =
       kind: "ready";
       tenant: ExplicitTenant;
       snapshot: ClientOperationsSnapshot;
+      handover: ClientHandoverChecklist;
       workspaceName: string;
       clientName: string;
       brandName: string | null;
@@ -47,7 +53,7 @@ export default async function ClientOperationsPage({ searchParams }: PageProps) 
     case "context-required": return <StatePage title="Contexto incompleto" detail="Abra um workspace autorizado antes de acessar o Client Operations." />;
     case "authentication-required": return <StatePage title="Autenticação necessária" detail="Entre novamente no Tehkné Growth OS." />;
     case "forbidden": return <StatePage title="Acesso não autorizado" detail="Sua membership não concede leitura deste workspace." />;
-    case "unavailable": return <StatePage title="Client Operations indisponível" detail="Não foi possível carregar o intake. Se este release acabou de ser publicado, confirme a migration Production antes de usar esta área." />;
+    case "unavailable": return <StatePage title="Client Operations indisponível" detail="Não foi possível carregar intake/handover. Se este release acabou de ser publicado, confirme as migrations Production antes de usar esta área." />;
     case "ready": return <ReadyPage state={state} />;
   }
 }
@@ -67,10 +73,16 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
     const repository = new PrismaIdentityRepository(database);
     const session = await validateSession(repository, token, secret);
     const parsedTenant = parseTenantContext(tenant);
-    const snapshot = await loadAuthorizedClientOperationsSnapshot(
-      { database, authorizationStore: repository },
-      { userId: session.userId, tenant: parsedTenant },
-    );
+    const [snapshot, handover] = await Promise.all([
+      loadAuthorizedClientOperationsSnapshot(
+        { database, authorizationStore: repository },
+        { userId: session.userId, tenant: parsedTenant },
+      ),
+      loadAuthorizedClientHandoverChecklist(
+        { database, authorizationStore: repository },
+        { userId: session.userId, tenant: parsedTenant },
+      ),
+    ]);
     const workspace = await database.workspace.findFirst({
       where: {
         id: tenant.workspaceId,
@@ -90,6 +102,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       kind: "ready",
       tenant,
       snapshot,
+      handover,
       workspaceName: workspace.name,
       clientName: workspace.clientOrganization.name,
       brandName: workspace.brand?.name ?? null,
@@ -106,13 +119,17 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
 function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "ready" }> }>) {
   const profile = state.snapshot.profile;
   const allowedTransitions = profile ? getAllowedClientLifecycleTransitions(profile.lifecycleState) : [];
+  const handoverEntries = state.handover.entries.map((entry) => ({
+    ...entry,
+    verifiedAt: entry.verifiedAt?.toISOString() ?? null,
+  }));
 
   return <main className={styles.page}>
     <header className={styles.header}>
       <div>
         <p className={styles.eyebrow}>Tehkné Growth OS · Client Operations</p>
         <h1>{state.clientName}</h1>
-        <p>{state.brandName ? `${state.brandName} · ` : ""}{state.workspaceName}. Intake, estágio operacional e histórico auditável sem misturar isso com mutações de mídia.</p>
+        <p>{state.brandName ? `${state.brandName} · ` : ""}{state.workspaceName}. Intake, lifecycle e handover auditáveis sem misturar governança com mutações de mídia.</p>
       </div>
       <a className={styles.backLink} href={`/command-center?${state.backQuery}`}>Voltar ao Command Center</a>
     </header>
@@ -121,10 +138,19 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
       <article><span>Lifecycle</span><strong>{humanize(profile?.lifecycleState ?? "INTAKE")}</strong></article>
       <article><span>North Star</span><strong>{profile?.northStarMetricId ?? "Não definida"}</strong></article>
       <article><span>Budget mensal</span><strong>{formatMoney(profile?.monthlyMediaBudget ?? null, profile?.financialCurrency ?? state.currency)}</strong></article>
-      <article><span>Handover</span><strong>{profile?.handoverSource ?? "Não informado"}</strong></article>
+      <article><span>Handover</span><strong>{state.handover.complete ? "COMPLETE" : `${state.handover.verifiedCount}/${state.handover.entries.length} VERIFIED`}</strong></article>
     </section>
 
     <ClientOperationsForm tenant={state.tenant} profile={profile} defaultCurrency={state.currency} allowedTransitions={allowedTransitions} />
+
+    <HandoverChecklist
+      tenant={state.tenant}
+      entries={handoverEntries}
+      complete={state.handover.complete}
+      verifiedCount={state.handover.verifiedCount}
+      notApplicableCount={state.handover.notApplicableCount}
+      blockedCount={state.handover.blockedCount}
+    />
 
     <section className={styles.timeline}>
       <p className={styles.eyebrow}>Lifecycle History</p>
