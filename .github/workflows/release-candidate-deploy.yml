@@ -8,6 +8,7 @@ on:
       - "prisma/**"
       - "sector-packs/**"
       - "scripts/rc-workspace-*.sql"
+      - "scripts/psql-database-url.mjs"
       - "package.json"
       - "package-lock.json"
       - "next.config.ts"
@@ -102,7 +103,8 @@ jobs:
               echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED missing=DATABASE_URL"
               exit 3
             fi
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql
+            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
+            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql
           ')
           status=$?
           set -e
