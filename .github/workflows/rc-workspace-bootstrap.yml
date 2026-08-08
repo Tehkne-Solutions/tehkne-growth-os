@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - "src/modules/growth-operations/rc-workspace.ts"
+      - "src/app/api/internal/rc-workspace/route.ts"
       - "scripts/rc-workspace-*.sql"
       - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
@@ -11,40 +13,24 @@ on:
       - "docs/releases/RC-1.md"
   pull_request:
     paths:
+      - "src/modules/growth-operations/rc-workspace.ts"
+      - "src/app/api/internal/rc-workspace/route.ts"
+      - "tests/integration/rc-workspace-postgres.test.ts"
       - "scripts/rc-workspace-*.sql"
       - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
       - ".github/workflows/release-candidate-deploy.yml"
       - "docs/releases/RC-1.md"
-  workflow_dispatch:
-    inputs:
-      target:
-        description: Vercel environment to inspect or bootstrap
-        required: true
-        default: preview
-        type: choice
-        options:
-          - preview
-          - production
-      mode:
-        description: Read-only inspection or idempotent workspace bootstrap
-        required: true
-        default: inspect
-        type: choice
-        options:
-          - inspect
-          - apply
-      confirmation:
-        description: Required only for apply. Use APPLY_RC_WORKSPACE_PREVIEW or APPLY_RC_WORKSPACE_PRODUCTION.
-        required: false
-        type: string
+  issues:
+    types: [opened]
 
 permissions:
   contents: read
+  issues: write
   statuses: write
 
 concurrency:
-  group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
+  group: rc-workspace-bootstrap-${{ github.event_name == 'issues' && 'production-apply' || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -130,187 +116,182 @@ jobs:
           test "$resolved_id" = "93000000-0000-4000-8000-000000000001"
           echo "RC_WORKSPACE_SQL=PASS workspace_count=$workspace_count audit_count=$audit_count workspace_id=$resolved_id"
 
-  inspect-or-bootstrap:
+  apply-production:
     needs: validate-sql
+    if: >-
+      github.event_name == 'issues' &&
+      github.event.action == 'opened' &&
+      github.event.issue.title == '[RC] APPLY_RC_WORKSPACE_PRODUCTION' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       VERCEL_SCOPE: tehkne-solutions-projects
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
-      REQUESTED_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'inspect' }}
-      CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || '' }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
 
-      - name: Verify Vercel credential
-        run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "RC_WORKSPACE=BLOCKED missing=VERCEL_TOKEN"
-            exit 2
-          fi
-
-      - name: Guard mutation mode
+      - name: Verify production credentials
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ "$REQUESTED_MODE" != "inspect" ]; then
-            echo "RC_WORKSPACE=BLOCKED automatic_events_are_read_only"
+          missing=""
+          [ -n "$VERCEL_TOKEN" ] || missing="$missing VERCEL_TOKEN"
+          [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
+          if [ -n "$missing" ]; then
+            echo "RC_WORKSPACE_APPLY=BLOCKED missing=$missing"
             exit 2
-          fi
-
-          if [ "$REQUESTED_MODE" = "apply" ]; then
-            expected="APPLY_RC_WORKSPACE_PREVIEW"
-            if [ "$TARGET_ENV" = "production" ]; then
-              expected="APPLY_RC_WORKSPACE_PRODUCTION"
-            fi
-            if [ "$CONFIRMATION" != "$expected" ]; then
-              echo "RC_WORKSPACE=BLOCKED invalid_confirmation target=$TARGET_ENV"
-              exit 2
-            fi
           fi
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
-      - name: Ensure PostgreSQL client
-        shell: bash
-        run: |
-          if ! command -v psql >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y postgresql-client
-          fi
-
-      - name: Link Vercel project
+      - name: Link canonical Vercel project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
-      - name: Inspect RC workspace state
-        id: environment
+      - name: Inspect current production RC workspace
+        id: before
         shell: bash
         run: |
           set +e
-          vercel env run -e "$TARGET_ENV" -- bash -lc '
-            if [ -z "$DATABASE_URL" ]; then
-              echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED missing=DATABASE_URL"
-              exit 3
-            fi
-            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
-            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
-          '
+          response=$(vercel curl /api/internal/rc-workspace \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
           status=$?
           set -e
-
-          if [ "$status" -eq 3 ]; then
-            echo "database_ready=false" >> "$GITHUB_OUTPUT"
-            echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED environment=$TARGET_ENV"
-            if [ "$REQUESTED_MODE" = "apply" ]; then
-              echo "RC_WORKSPACE=BLOCKED cannot_apply_without_DATABASE_URL"
-              exit 2
-            fi
-            exit 0
-          fi
-
+          printf '%s\n' "$response"
           if [ "$status" -ne 0 ]; then
-            echo "RC_WORKSPACE=FAILED inspection_exit=$status"
+            echo "RC_WORKSPACE_APPLY=BLOCKED production_runtime_unavailable"
             exit "$status"
           fi
 
-          echo "database_ready=true" >> "$GITHUB_OUTPUT"
-          echo "RC_WORKSPACE_ENVIRONMENT=READY environment=$TARGET_ENV"
-
-      - name: Apply RC workspace bootstrap
-        if: env.REQUESTED_MODE == 'apply' && steps.environment.outputs.database_ready == 'true'
-        shell: bash
-        run: |
-          vercel env run -e "$TARGET_ENV" -- bash -lc '
-            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
-            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
-          '
-
-      - name: Verify resolved RC workspace
-        if: steps.environment.outputs.database_ready == 'true'
-        id: workspace
-        shell: bash
-        run: |
-          output=$(vercel env run -e "$TARGET_ENV" -- bash -lc '
-            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
-            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql
+          workspace_id=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              try {
+                const parsed = JSON.parse(body);
+                if (parsed.status === "ready" && typeof parsed.workspaceId === "string") {
+                  process.stdout.write(parsed.workspaceId);
+                }
+              } catch {}
+            });
           ')
-          printf '%s\n' "$output"
-          workspace_id=$(printf '%s\n' "$output" | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | tail -n 1 || true)
-
-          if [ -z "$workspace_id" ]; then
-            echo "RC_WORKSPACE_STATUS=missing"
-          else
-            echo "RC_WORKSPACE_STATUS=ready"
+          if [ -n "$workspace_id" ]; then
+            echo "already_ready=true" >> "$GITHUB_OUTPUT"
             echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+            echo "RC_WORKSPACE_APPLY=SKIPPED already_ready"
+          else
+            echo "already_ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish bootstrap summary
-        if: always()
+      - name: Apply canonical RC workspace
+        if: steps.before.outputs.already_ready != 'true'
         shell: bash
         run: |
-          {
-            echo "## Tehkné Growth OS RC workspace"
-            echo ""
-            echo "- Environment: $TARGET_ENV"
-            echo "- Mode: $REQUESTED_MODE"
-            echo "- Database configured: ${{ steps.environment.outputs.database_ready || 'unknown' }}"
-            echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
-            echo "- Signature: Tehkné Solutions"
-          } >> "$GITHUB_STEP_SUMMARY"
+          response=$(vercel curl /api/internal/rc-workspace \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --request POST \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            --header "Content-Type: application/json" \
+            --data '{"confirmation":"APPLY_RC_WORKSPACE_PRODUCTION"}')
+          printf '%s\n' "$response"
 
-      - name: Publish production inspection commit status
-        if: always() && github.event_name == 'push'
+      - name: Verify production RC workspace
+        id: after
+        shell: bash
+        run: |
+          response=$(vercel curl /api/internal/rc-workspace \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf '%s\n' "$response"
+          workspace_id=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const parsed = JSON.parse(body);
+              if (parsed.status !== "ready" || typeof parsed.workspaceId !== "string") process.exit(2);
+              process.stdout.write(parsed.workspaceId);
+            });
+          ')
+          echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+          echo "RC_WORKSPACE_APPLY=PASS workspace_id=$workspace_id"
+
+      - name: Publish production commit status
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          JOB_STATUS: ${{ job.status }}
-          DATABASE_READY: ${{ steps.environment.outputs.database_ready }}
-          RESOLVED_WORKSPACE: ${{ steps.workspace.outputs.workspace_id }}
+          WORKSPACE_ID: ${{ steps.after.outputs.workspace_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          state="pending"
-          description="Production database/workspace inspection pending"
-
-          if [ "$JOB_STATUS" = "failure" ]; then
-            state="failure"
-            description="Production RC workspace inspection failed"
-          elif [ "$DATABASE_READY" != "true" ]; then
-            state="pending"
-            description="Production DATABASE_URL is not configured"
-          elif [ -n "$RESOLVED_WORKSPACE" ]; then
-            state="success"
-            description="Production RC workspace is ready"
-          else
-            state="pending"
-            description="Production database ready; RC workspace missing"
-          fi
-
-          export state description
+          main_sha=$(git rev-parse HEAD)
+          export WORKSPACE_ID RUN_URL
           python - <<'PY' > /tmp/rc-workspace-status.json
           import json
           import os
           print(json.dumps({
-              "state": os.environ["state"],
+              "state": "success",
               "context": "TKN RC Workspace/Production",
-              "description": os.environ["description"],
+              "description": "Production RC workspace is ready",
               "target_url": os.environ["RUN_URL"],
           }))
           PY
-
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             --data-binary @/tmp/rc-workspace-status.json \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$main_sha"
+
+      - name: Comment approval issue
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          WORKSPACE_ID: ${{ steps.after.outputs.workspace_id }}
+        run: |
+          export WORKSPACE_ID
+          python - <<'PY' > /tmp/rc-workspace-comment.json
+          import json
+          import os
+          print(json.dumps({
+              "body": (
+                  "RC Production workspace bootstrap completed and verified.\n\n"
+                  f"Workspace: `{os.environ['WORKSPACE_ID']}`\n\n"
+                  "Signature: **Tehkné Solutions**"
+              )
+          }))
+          PY
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data-binary @/tmp/rc-workspace-comment.json \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments"

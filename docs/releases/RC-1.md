@@ -12,7 +12,7 @@ Validate the already-hardened Growth OS build against a real published environme
 
 - `GROWTH_OS_BASE_URL`: public HTTPS deployment URL.
 - `CRON_SECRET`: production/staging scheduler secret.
-- `WORKSPACE_ID`: validation workspace with representative connectors configured; the release workflow resolves the canonical RC workspace automatically when no override is supplied.
+- `WORKSPACE_ID`: validation workspace with representative connectors configured; `Release Candidate Deploy` resolves the canonical RC workspace from the deployed runtime when no override is supplied.
 - `VERCEL_TOKEN`: GitHub Actions secret used only by the RC deployment/bootstrap workflows.
 
 Never commit secret values.
@@ -33,7 +33,9 @@ Never commit secret values.
 
 ## Vercel RC deployment
 
-The GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It targets the Tehkné Solutions Vercel scope, installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, resolves the canonical RC workspace when available, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment when smoke prerequisites are available.
+The GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It targets the Tehkné Solutions Vercel scope, installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, creates a preview or production deployment and records the exact deployment URL.
+
+After deployment, the workflow calls `/api/internal/rc-workspace` on that exact deployment using `vercel curl` and `CRON_SECRET`. Workspace discovery therefore happens inside the deployed runtime, where Sensitive Vercel environment variables such as `DATABASE_URL` are available without exporting their values to GitHub Actions. When the canonical workspace exists, the returned UUID becomes `WORKSPACE_ID` and `npm run smoke:rc` runs against the same deployment.
 
 Required GitHub Actions secrets:
 
@@ -42,9 +44,9 @@ Required GitHub Actions secrets:
 
 Optional override:
 
-- `RC_WORKSPACE_ID` — when present, it takes precedence over database discovery. When absent, the workflow resolves the active `rc-validation` workspace from the target environment database.
+- `RC_WORKSPACE_ID` — when present, it takes precedence over runtime discovery. The UUID is not treated as a database credential; the override exists only for emergency/diagnostic compatibility.
 
-The Vercel project must contain the runtime environment variables documented by production readiness, including database, vault, OAuth/provider configuration and scheduler secrets. The workflows do not copy secret values into source control.
+The Vercel project must contain the runtime environment variables documented by production readiness, including database, connector-vault, provider and scheduler configuration. The workflows never print or copy Sensitive environment values into source control.
 
 ## RC workspace bootstrap
 
@@ -58,25 +60,39 @@ with slugs:
 - client: `tkn-growth-rc`
 - workspace: `rc-validation`
 
-The workspace bootstrap is intentionally separate from schema migrations. It uses:
+The bootstrap has two independently tested implementations:
 
-- `scripts/rc-workspace-inspect.sql` for read-only state inspection;
-- `scripts/rc-workspace-bootstrap.sql` for an idempotent transactional bootstrap with `rc.workspace.bootstrap` audit evidence;
-- `scripts/rc-workspace-id.sql` for canonical workspace discovery without treating the UUID as a secret;
-- the `RC Workspace Bootstrap` workflow for environment access and mutation guards.
+- PostgreSQL validation fixtures: `scripts/rc-workspace-inspect.sql`, `scripts/rc-workspace-bootstrap.sql` and `scripts/rc-workspace-id.sql`;
+- production runtime service: `src/modules/growth-operations/rc-workspace.ts` exposed only through the authenticated internal endpoint `/api/internal/rc-workspace`.
 
-Safety rules:
+The SQL gate runs against PostgreSQL 16, applies the bootstrap twice and requires exactly one canonical workspace and one `rc.workspace.bootstrap` audit record. The runtime service is separately covered by integration tests and uses Prisma inside the Vercel runtime rather than exporting `DATABASE_URL`.
 
-1. Pull requests only inspect the Vercel Preview environment and never mutate it.
-2. Trusted pushes to `main` only inspect the Production environment and never mutate it.
-3. `apply` exists only through manual `workflow_dispatch`.
-4. Preview apply requires the exact confirmation `APPLY_RC_WORKSPACE_PREVIEW`.
-5. Production apply requires the exact confirmation `APPLY_RC_WORKSPACE_PRODUCTION`.
-6. An environment without `DATABASE_URL` is reported as `UNCONFIGURED`; apply remains blocked.
-7. The SQL bootstrap is validated against PostgreSQL 16, executed twice and required to produce exactly one canonical workspace and one bootstrap audit record.
-8. After bootstrap, `Release Candidate Deploy` resolves the workspace UUID from the target database automatically; `RC_WORKSPACE_ID` remains available only as an explicit override.
+### Runtime endpoint
 
-A missing Preview database does not itself block project provisioning. Production RC approval still requires a configured database, the canonical validation workspace and all real-operation gates below.
+`GET /api/internal/rc-workspace`
+
+- requires `Authorization: Bearer <CRON_SECRET>`;
+- is read-only;
+- returns `ready` plus `workspaceId`, or `missing`;
+- never returns database credentials.
+
+`POST /api/internal/rc-workspace`
+
+- requires the same `CRON_SECRET` bearer authentication;
+- accepts only the exact confirmation matching `VERCEL_TARGET_ENV`/`VERCEL_ENV`;
+- Production requires `APPLY_RC_WORKSPACE_PRODUCTION`;
+- Preview requires `APPLY_RC_WORKSPACE_PREVIEW`;
+- performs an idempotent transaction and writes `rc.workspace.bootstrap` audit evidence.
+
+### Production approval
+
+Production bootstrap is never triggered by a normal push or pull request. The mutation path is an auditable GitHub issue:
+
+`[RC] APPLY_RC_WORKSPACE_PRODUCTION`
+
+The `RC Workspace Bootstrap` workflow accepts that event only when the issue author association is `OWNER`, `MEMBER` or `COLLABORATOR`. It validates the bootstrap against PostgreSQL 16 first, checks whether Production is already ready, applies the exact Production confirmation only when necessary, verifies the workspace afterwards, publishes the `TKN RC Workspace/Production` commit status and comments the resolved workspace UUID on the approval issue.
+
+This keeps the database credential inside Vercel while preserving explicit human authorization and GitHub audit history.
 
 ## Real-operation validation
 
