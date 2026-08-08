@@ -1,0 +1,42 @@
+name: INT-47 Production Runtime Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-47-production-runtime-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --global vercel@latest
+      - name: Link Production project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+      - name: Probe schema readiness
+        shell: bash
+        run: |
+          response=$(vercel curl /api/internal/schema-readiness -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
+          printf 'SCHEMA_RESPONSE=%s\n' "$response"
+      - name: Probe RC workspace
+        shell: bash
+        run: |
+          set +e
+          response=$(vercel curl /api/internal/rc-workspace -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf 'WORKSPACE_RESPONSE=%s\n' "$response"
+          echo "WORKSPACE_EXIT=$status"
