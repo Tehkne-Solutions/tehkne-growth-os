@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma } from "@/generated/prisma/client";
 import { COMMAND_CENTER_PERMISSIONS } from "@/modules/command-center/permissions";
 import { GROWTH_INTELLIGENCE_PERMISSIONS } from "@/modules/growth-intelligence/permissions";
 import { authorize } from "@/modules/identity";
 import type { AuthorizationMembershipStore } from "@/modules/identity/application/contracts";
 import { parseTenantContext, type TenantContext } from "@/modules/tenancy";
-import type { DatabaseClient } from "@/shared/db/client";
+import type { DatabaseClient, DatabaseInputJsonValue } from "@/shared/db/client";
 
 export const GROWTH_EXPERIMENT_STATUSES = ["DRAFT", "READY", "RUNNING", "OBSERVING", "CONCLUDED", "CANCELLED"] as const;
 export const GROWTH_EXPERIMENT_CATEGORIES = ["AUDIENCE", "OFFER", "CREATIVE", "COPY", "LANDING_PAGE", "FORM_FRICTION", "BIDDING", "CONVERSION_SIGNAL", "BUDGET_DISTRIBUTION", "CRM_FOLLOW_UP", "RETENTION_REACTIVATION", "OTHER"] as const;
@@ -268,7 +267,7 @@ function auditData(
   actorUserId: string,
   action: string,
   resourceId: string,
-  metadata: Prisma.InputJsonValue,
+  metadata: DatabaseInputJsonValue,
 ) {
   return {
     operatorOrganizationId: tenant.operatorOrganizationId,
