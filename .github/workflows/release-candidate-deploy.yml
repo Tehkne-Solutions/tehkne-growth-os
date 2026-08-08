@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      VERCEL_SCOPE: thales-dvfs-projects
+      VERCEL_SCOPE: tehkne-solutions-projects
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
