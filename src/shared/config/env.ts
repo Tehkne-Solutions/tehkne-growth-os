@@ -21,7 +21,13 @@ const serverEnvironmentSchema = z
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
 
-export function resolveApplicationUrl(input: NodeJS.ProcessEnv): string | undefined {
+type ApplicationUrlEnvironment = Readonly<{
+  APP_URL?: string;
+  VERCEL_PROJECT_PRODUCTION_URL?: string;
+  VERCEL_URL?: string;
+}>;
+
+export function resolveApplicationUrl(input: ApplicationUrlEnvironment): string | undefined {
   const explicit = input.APP_URL?.trim();
   if (explicit) return explicit;
 
