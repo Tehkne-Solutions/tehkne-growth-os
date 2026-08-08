@@ -91,8 +91,53 @@ jobs:
           echo "GROWTH_OS_BASE_URL=$URL" >> "$GITHUB_ENV"
           echo "Release candidate deployed to $URL"
 
+      - name: Inspect deployed schema readiness
+        id: schema
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "RC_SCHEMA=PENDING missing=CRON_SECRET"
+            exit 0
+          fi
+
+          set +e
+          response=$(vercel curl /api/internal/schema-readiness \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+
+          if [ "$status" -ne 0 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "RC_SCHEMA=UNAVAILABLE runtime_status=$status"
+            if [ "$RC_TARGET" = "production" ]; then
+              exit "$status"
+            fi
+            exit 0
+          fi
+
+          schema_ready=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const parsed = JSON.parse(body);
+              process.stdout.write(parsed.schemaReady === true ? "true" : "false");
+            });
+          ')
+          echo "ready=$schema_ready" >> "$GITHUB_OUTPUT"
+          echo "RC_SCHEMA=$([ "$schema_ready" = "true" ] && echo READY || echo NOT_READY)"
+
       - name: Resolve RC workspace from deployed runtime
         id: workspace
+        if: steps.schema.outputs.ready == 'true'
         shell: bash
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
@@ -104,17 +149,9 @@ jobs:
             exit 0
           fi
 
-          if [ -z "$CRON_SECRET" ]; then
-            echo "RC_WORKSPACE=PENDING missing=CRON_SECRET"
-            echo "source=missing-cron-secret" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           set +e
           response=$(vercel curl /api/internal/rc-workspace \
             --deployment "$DEPLOYMENT_URL" \
-            --scope "$VERCEL_SCOPE" \
-            --token "$VERCEL_TOKEN" \
             -- \
             --silent \
             --show-error \
@@ -122,7 +159,6 @@ jobs:
             --header "Authorization: Bearer $CRON_SECRET")
           status=$?
           set -e
-
           printf '%s\n' "$response"
 
           if [ "$status" -ne 0 ]; then
@@ -161,12 +197,13 @@ jobs:
       - name: Determine smoke readiness
         id: smoke-readiness
         run: |
-          if [ -n "$CRON_SECRET" ] && [ -n "$WORKSPACE_ID" ]; then
+          if [ "${{ steps.schema.outputs.ready }}" = "true" ] && [ -n "$CRON_SECRET" ] && [ -n "$WORKSPACE_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
             echo "RC_SMOKE=READY"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             missing=""
+            [ "${{ steps.schema.outputs.ready }}" = "true" ] || missing="$missing production schema"
             [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
             [ -n "$WORKSPACE_ID" ] || missing="$missing canonical RC workspace"
             echo "RC_SMOKE=PENDING missing=$missing"
@@ -184,9 +221,10 @@ jobs:
             echo ""
             echo "- Target: $RC_TARGET"
             echo "- Deployment: ${{ steps.deploy.outputs.url }}"
+            echo "- Schema: ${{ steps.schema.outputs.ready == 'true' && 'ready' || 'not-ready' }}"
             echo "- Workspace source: ${{ steps.workspace.outputs.source || 'not-resolved' }}"
             echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
-            echo "- Smoke: ${{ steps.smoke-readiness.outputs.ready == 'true' && 'executed' || 'pending workspace bootstrap' }}"
+            echo "- Smoke: ${{ steps.smoke-readiness.outputs.ready == 'true' && 'executed' || 'pending prerequisites' }}"
             echo "- Commit: $GITHUB_SHA"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
