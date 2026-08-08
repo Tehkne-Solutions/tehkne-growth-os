@@ -47,6 +47,7 @@ describe("operational release console", () => {
       },
       production: production(),
       environment: {
+        NODE_ENV: "test",
         VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
         VERCEL_ENV: "production",
         VERCEL_PROJECT_PRODUCTION_URL: "tehkne-growth-os.vercel.app",
@@ -90,7 +91,7 @@ describe("operational release console", () => {
         productionReady: false,
       },
       production: degradedProduction,
-      environment: {},
+      environment: { NODE_ENV: "test" },
     });
 
     expect(snapshot.coreCertified).toBe(true);
