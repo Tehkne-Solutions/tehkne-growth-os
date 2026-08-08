@@ -1,0 +1,108 @@
+name: INT-72 Vercel Quota Window
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-72-vercel-quota-window.yml"
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_SCOPE: tehkne-solutions-projects
+  VERCEL_PROJECT_NAME: tehkne-growth-os
+
+jobs:
+  inspect-quota-window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Require Vercel token
+        run: test -n "$VERCEL_TOKEN"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Resolve project and team IDs without secret values
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p probe
+          cd probe
+          vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" >/dev/null
+          project_id=$(node -p 'require("./.vercel/project.json").projectId')
+          org_id=$(node -p 'require("./.vercel/project.json").orgId')
+          test -n "$project_id"
+          test -n "$org_id"
+          echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+          echo "org_id=$org_id" >> "$GITHUB_OUTPUT"
+          echo "VERCEL_PROJECT_RESOLUTION=PASS"
+
+      - name: Read deployment inventory and calculate rolling window
+        shell: bash
+        env:
+          PROJECT_ID: ${{ steps.project.outputs.project_id }}
+          ORG_ID: ${{ steps.project.outputs.org_id }}
+        run: |
+          set -euo pipefail
+          headers=$(mktemp)
+          body=$(mktemp)
+          curl --silent --show-error --fail-with-body \
+            --dump-header "$headers" \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v6/deployments?projectId=$PROJECT_ID&teamId=$ORG_ID&limit=100" \
+            --output "$body"
+
+          node - "$body" <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const rows = Array.isArray(payload.deployments) ? payload.deployments : [];
+          const created = rows
+            .map((d) => Number(d.created ?? d.createdAt))
+            .filter(Number.isFinite)
+            .sort((a, b) => b - a);
+          console.log(`VERCEL_DEPLOYMENT_INVENTORY count=${rows.length}`);
+          if (!created.length) process.exit(2);
+          const newest = created[0];
+          const oldestReturned = created[created.length - 1];
+          const hundredth = created.length >= 100 ? created[99] : null;
+          console.log(`VERCEL_NEWEST=${new Date(newest).toISOString()}`);
+          console.log(`VERCEL_OLDEST_RETURNED=${new Date(oldestReturned).toISOString()}`);
+          if (hundredth !== null) {
+            const firstLikelySlot = hundredth + 86400000;
+            console.log(`VERCEL_100TH_NEWEST=${new Date(hundredth).toISOString()}`);
+            console.log(`VERCEL_FIRST_LIKELY_SLOT_AFTER=${new Date(firstLikelySlot).toISOString()}`);
+            console.log(`VERCEL_SECONDS_UNTIL_FIRST_LIKELY_SLOT=${Math.max(0, Math.ceil((firstLikelySlot - Date.now()) / 1000))}`);
+          } else {
+            console.log('VERCEL_100TH_NEWEST=NOT_PRESENT');
+          }
+          const byTarget = rows.reduce((acc, d) => {
+            const key = d.target ?? 'preview';
+            acc[key] = (acc[key] ?? 0) + 1;
+            return acc;
+          }, {});
+          console.log(`VERCEL_TARGET_COUNTS=${JSON.stringify(byTarget)}`);
+          NODE
+
+          echo "REST_RATE_LIMIT_HEADERS:"
+          grep -Ei '^x-ratelimit-(limit|remaining|reset):' "$headers" || true
+
+      - name: Record read-only evidence
+        run: |
+          {
+            echo "## INT-72 Vercel rolling quota window"
+            echo ""
+            echo "- Operation: read-only REST deployment inventory"
+            echo "- No deployment created"
+            echo "- No alias changed"
+            echo "- No environment value downloaded or printed"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
