@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { COMMAND_CENTER_PERMISSIONS } from "@/modules/command-center/permissions";
 import { GROWTH_INTELLIGENCE_PERMISSIONS } from "@/modules/growth-intelligence/permissions";
 import { authorize } from "@/modules/identity";
@@ -137,7 +138,13 @@ export async function createGrowthExperiment(
     `;
     const experiment = rows[0];
     if (!experiment) throw new GrowthExperimentValidationError("Unable to create experiment.");
-    await transaction.auditEvent.create({ data: auditData(tenant, input.userId, "growth.experiment.created", id, { category: input.category, design: input.design, targetMetricId: normalized.targetMetricId }) });
+    await transaction.auditEvent.create({
+      data: auditData(tenant, input.userId, "growth.experiment.created", id, {
+        category: input.category,
+        design: input.design,
+        targetMetricId: normalized.targetMetricId,
+      }),
+    });
     return experiment;
   });
 }
@@ -196,7 +203,14 @@ export async function transitionGrowthExperiment(
     `;
     const updated = rows[0];
     if (!updated) throw new GrowthExperimentNotFoundError("Experiment disappeared during transition.");
-    await transaction.auditEvent.create({ data: auditData(tenant, input.userId, "growth.experiment.transitioned", input.experimentId, { from: current.status, to: input.toStatus, design: current.design, ...(conclusion ? { decision: conclusion.decision } : {}) }) });
+    await transaction.auditEvent.create({
+      data: auditData(tenant, input.userId, "growth.experiment.transitioned", input.experimentId, {
+        from: current.status,
+        to: input.toStatus,
+        design: current.design,
+        ...(conclusion ? { decision: conclusion.decision } : {}),
+      }),
+    });
     return updated;
   });
 }
@@ -211,33 +225,85 @@ function validateDraftInput(input: Readonly<{
   const targetMetricId = requiredText(input.targetMetricId, 120, 1, "targetMetricId");
   const intervention = requiredText(input.intervention, 5000, 3, "intervention");
   const guardrailMetricId = optionalText(input.guardrailMetricId, 120);
-  if (input.baselineValue !== null && input.baselineValue !== undefined && !Number.isFinite(input.baselineValue)) throw new GrowthExperimentValidationError("baselineValue must be finite.");
+  if (input.baselineValue !== null && input.baselineValue !== undefined && !Number.isFinite(input.baselineValue)) {
+    throw new GrowthExperimentValidationError("baselineValue must be finite.");
+  }
   const baselinePeriodStart = input.baselinePeriodStart ?? null;
   const baselinePeriodEnd = input.baselinePeriodEnd ?? null;
-  if ((baselinePeriodStart === null) !== (baselinePeriodEnd === null)) throw new GrowthExperimentValidationError("Baseline period requires both start and end.");
-  if (baselinePeriodStart && baselinePeriodEnd && baselinePeriodEnd < baselinePeriodStart) throw new GrowthExperimentValidationError("Baseline period end must be after start.");
-  return { title, hypothesis, targetMetricId, intervention, guardrailMetricId, baselineValue: input.baselineValue ?? null, baselinePeriodStart, baselinePeriodEnd, ownerUserId: input.ownerUserId ?? null, observationUntil: input.observationUntil ?? null };
+  if ((baselinePeriodStart === null) !== (baselinePeriodEnd === null)) {
+    throw new GrowthExperimentValidationError("Baseline period requires both start and end.");
+  }
+  if (baselinePeriodStart && baselinePeriodEnd && baselinePeriodEnd < baselinePeriodStart) {
+    throw new GrowthExperimentValidationError("Baseline period end must be after start.");
+  }
+  return {
+    title,
+    hypothesis,
+    targetMetricId,
+    intervention,
+    guardrailMetricId,
+    baselineValue: input.baselineValue ?? null,
+    baselinePeriodStart,
+    baselinePeriodEnd,
+    ownerUserId: input.ownerUserId ?? null,
+    observationUntil: input.observationUntil ?? null,
+  };
 }
 
-function validateConclusion(input: Readonly<{ resultSummary?: string | null; decision?: GrowthExperimentDecision | null; learning?: string | null }>) {
+function validateConclusion(input: Readonly<{
+  resultSummary?: string | null;
+  decision?: GrowthExperimentDecision | null;
+  learning?: string | null;
+}>) {
   const resultSummary = requiredText(input.resultSummary ?? "", 5000, 3, "resultSummary");
   const learning = requiredText(input.learning ?? "", 5000, 3, "learning");
-  if (!input.decision || input.decision === "CANCELLED") throw new GrowthExperimentValidationError("A concluded experiment requires a non-cancelled decision.");
+  if (!input.decision || input.decision === "CANCELLED") {
+    throw new GrowthExperimentValidationError("A concluded experiment requires a non-cancelled decision.");
+  }
   return { resultSummary, decision: input.decision, learning };
 }
 
-function auditData(tenant: ReturnType<typeof requireWorkspace>, actorUserId: string, action: string, resourceId: string, metadata: Readonly<Record<string, unknown>>) {
-  return { operatorOrganizationId: tenant.operatorOrganizationId, clientOrganizationId: tenant.clientOrganizationId, workspaceId: tenant.workspaceId, actorUserId, action, resourceType: "growth_experiment", resourceId, metadata };
+function auditData(
+  tenant: ReturnType<typeof requireWorkspace>,
+  actorUserId: string,
+  action: string,
+  resourceId: string,
+  metadata: Prisma.InputJsonValue,
+) {
+  return {
+    operatorOrganizationId: tenant.operatorOrganizationId,
+    clientOrganizationId: tenant.clientOrganizationId,
+    workspaceId: tenant.workspaceId,
+    actorUserId,
+    action,
+    resourceType: "growth_experiment",
+    resourceId,
+    metadata,
+  };
 }
 
 function requiredText(value: string, max: number, min: number, name: string) {
   const normalized = value.trim();
-  if (normalized.length < min || normalized.length > max) throw new GrowthExperimentValidationError(`${name} length is invalid.`);
+  if (normalized.length < min || normalized.length > max) {
+    throw new GrowthExperimentValidationError(`${name} length is invalid.`);
+  }
   return normalized;
 }
-function optionalText(value: string | null | undefined, max: number) { if (!value?.trim()) return null; const normalized = value.trim(); if (normalized.length > max) throw new GrowthExperimentValidationError("Optional text is too long."); return normalized; }
-function requireWorkspace(value: TenantContext): TenantContext & { clientOrganizationId: string; workspaceId: string } {
+
+function optionalText(value: string | null | undefined, max: number) {
+  if (!value?.trim()) return null;
+  const normalized = value.trim();
+  if (normalized.length > max) throw new GrowthExperimentValidationError("Optional text is too long.");
+  return normalized;
+}
+
+function requireWorkspace(value: TenantContext): TenantContext & {
+  clientOrganizationId: string;
+  workspaceId: string;
+} {
   const tenant = parseTenantContext(value);
-  if (!tenant.clientOrganizationId || !tenant.workspaceId) throw new GrowthExperimentWorkspaceRequiredError("Experiment Registry requires an explicit workspace.");
+  if (!tenant.clientOrganizationId || !tenant.workspaceId) {
+    throw new GrowthExperimentWorkspaceRequiredError("Experiment Registry requires an explicit workspace.");
+  }
   return tenant as TenantContext & { clientOrganizationId: string; workspaceId: string };
 }
