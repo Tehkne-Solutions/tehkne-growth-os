@@ -26,39 +26,31 @@ jobs:
       - run: npm install --global vercel@latest
       - name: Link Production project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
-      - name: Probe schema readiness
+      - name: Probe schema and workspace
         shell: bash
         run: |
-          response=$(vercel curl /api/internal/schema-readiness -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
-          printf 'SCHEMA_RESPONSE=%s\n' "$response"
-      - name: Resolve RC workspace from Production runtime
-        id: workspace
-        shell: bash
-        run: |
-          response=$(vercel curl /api/internal/rc-workspace -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
-          printf 'WORKSPACE_RESPONSE=%s\n' "$response"
-          workspace_id=$(printf '%s' "$response" | node -e '
-            let body="";
-            process.stdin.on("data", chunk => body += chunk);
-            process.stdin.on("end", () => {
-              const parsed = JSON.parse(body);
-              if (parsed.status !== "ready" || typeof parsed.workspaceId !== "string") process.exit(2);
-              process.stdout.write(parsed.workspaceId);
-            });
-          ')
-          echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
-          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
-          echo "RC_WORKSPACE_RUNTIME=READY workspace_id=$workspace_id"
-      - name: Resolve current Production deployment URL
-        id: production
+          vercel curl /api/internal/schema-readiness -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET"
+          echo
+          vercel curl /api/internal/rc-workspace -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET"
+          echo
+      - name: Inspect current Production deployment and aliases
         shell: bash
         run: |
           output=$(vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
           printf '%s\n' "$output"
           url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | head -n 1)
           test -n "$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-      - name: Run RC smoke against Production
-        env:
-          GROWTH_OS_BASE_URL: ${{ steps.production.outputs.url }}
-        run: node scripts/release-candidate-smoke.mjs
+          echo "DEPLOYMENT_URL=$url"
+          vercel inspect "$url" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "ALIASES_BEGIN"
+          vercel alias ls --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "ALIASES_END"
+      - name: Probe likely stable Production alias
+        shell: bash
+        run: |
+          for url in \
+            "https://tehkne-growth-os.vercel.app" \
+            "https://tehkne-growth-os-tehkne-solutions-projects.vercel.app"; do
+            echo "PROBE_URL=$url"
+            curl --silent --show-error --location --max-redirs 0 -D - -o /dev/null "$url/" || true
+          done
