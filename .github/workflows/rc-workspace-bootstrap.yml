@@ -1,0 +1,161 @@
+name: RC Workspace Bootstrap
+
+on:
+  pull_request:
+    paths:
+      - "scripts/rc-workspace-*.sql"
+      - ".github/workflows/rc-workspace-bootstrap.yml"
+      - ".github/workflows/release-candidate-deploy.yml"
+      - "docs/releases/RC-1.md"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Vercel environment to inspect or bootstrap
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+      mode:
+        description: Read-only inspection or idempotent workspace bootstrap
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - apply
+      confirmation:
+        description: Required only for apply. Use APPLY_RC_WORKSPACE_PREVIEW or APPLY_RC_WORKSPACE_PRODUCTION.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+  cancel-in-progress: false
+
+jobs:
+  inspect-or-bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+      REQUESTED_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'inspect' }}
+      CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify Vercel credential
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "RC_WORKSPACE=BLOCKED missing=VERCEL_TOKEN"
+            exit 2
+          fi
+
+      - name: Guard mutation mode
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$REQUESTED_MODE" != "inspect" ]; then
+            echo "RC_WORKSPACE=BLOCKED pull_request_is_read_only"
+            exit 2
+          fi
+
+          if [ "$REQUESTED_MODE" = "apply" ]; then
+            expected="APPLY_RC_WORKSPACE_PREVIEW"
+            if [ "$TARGET_ENV" = "production" ]; then
+              expected="APPLY_RC_WORKSPACE_PRODUCTION"
+            fi
+            if [ "$CONFIRMATION" != "$expected" ]; then
+              echo "RC_WORKSPACE=BLOCKED invalid_confirmation target=$TARGET_ENV"
+              exit 2
+            fi
+          fi
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+
+      - name: Link Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Inspect RC workspace state
+        shell: bash
+        run: |
+          vercel env run -e "$TARGET_ENV" -- bash -lc '
+            if [ -z "$DATABASE_URL" ]; then
+              echo "RC_WORKSPACE=BLOCKED missing=DATABASE_URL environment='"$TARGET_ENV"'"
+              exit 2
+            fi
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
+          '
+
+      - name: Apply RC workspace bootstrap
+        if: env.REQUESTED_MODE == 'apply'
+        shell: bash
+        run: |
+          vercel env run -e "$TARGET_ENV" -- bash -lc '
+            if [ -z "$DATABASE_URL" ]; then
+              echo "RC_WORKSPACE=BLOCKED missing=DATABASE_URL environment='"$TARGET_ENV"'"
+              exit 2
+            fi
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+          '
+
+      - name: Verify resolved RC workspace
+        id: workspace
+        shell: bash
+        run: |
+          workspace_id=$(vercel env run -e "$TARGET_ENV" -- bash -lc '
+            psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+              SELECT w.id::text
+              FROM workspaces w
+              JOIN client_organizations c ON c.id = w.client_organization_id
+              JOIN operator_organizations o ON o.id = w.operator_organization_id
+              WHERE o.slug = '\''tehkne-solutions'\''
+                AND c.slug = '\''tkn-growth-rc'\''
+                AND w.slug = '\''rc-validation'\''
+                AND w.status = '\''ACTIVE'\''
+              LIMIT 1;
+            "
+          ' | tail -n 1 | tr -d '\r')
+
+          if [ -z "$workspace_id" ]; then
+            echo "RC_WORKSPACE_STATUS=missing"
+          else
+            echo "RC_WORKSPACE_STATUS=ready"
+            echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish bootstrap summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Tehkné Growth OS RC workspace"
+            echo ""
+            echo "- Environment: $TARGET_ENV"
+            echo "- Mode: $REQUESTED_MODE"
+            echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
