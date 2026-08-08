@@ -1,6 +1,13 @@
 name: RC Workspace Bootstrap
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/rc-workspace-*.sql"
+      - ".github/workflows/rc-workspace-bootstrap.yml"
+      - ".github/workflows/release-candidate-deploy.yml"
+      - "docs/releases/RC-1.md"
   pull_request:
     paths:
       - "scripts/rc-workspace-*.sql"
@@ -34,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+  group: rc-workspace-bootstrap-${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
   cancel-in-progress: false
 
 jobs:
@@ -122,7 +129,7 @@ jobs:
       VERCEL_SCOPE: tehkne-solutions-projects
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+      TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'production' || 'preview' }}
       REQUESTED_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'inspect' }}
       CONFIRMATION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirmation || '' }}
 
@@ -146,8 +153,8 @@ jobs:
       - name: Guard mutation mode
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$REQUESTED_MODE" != "inspect" ]; then
-            echo "RC_WORKSPACE=BLOCKED pull_request_is_read_only"
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ "$REQUESTED_MODE" != "inspect" ]; then
+            echo "RC_WORKSPACE=BLOCKED automatic_events_are_read_only"
             exit 2
           fi
 
