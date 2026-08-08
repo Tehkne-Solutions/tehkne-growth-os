@@ -40,22 +40,47 @@ jobs:
       - name: Link canonical project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
-      - name: List current production deployments
+      - name: Resolve current production deployment
+        id: production
         shell: bash
         run: |
-          echo "PRODUCTION_DEPLOYMENTS_BEGIN"
-          vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "PRODUCTION_DEPLOYMENTS_END"
+          output=$(vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          printf '%s\n' "$output"
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | head -n 1)
+          if [ -z "$url" ]; then
+            echo "PRODUCTION_DEPLOYMENT=NOT_FOUND"
+            exit 2
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "PRODUCTION_DEPLOYMENT=$url"
 
-      - name: Probe production RC workspace runtime
+      - name: Probe production with standard HTTPS curl
         shell: bash
+        env:
+          PRODUCTION_URL: ${{ steps.production.outputs.url }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "RC_RUNTIME_PROBE=SKIPPED missing=CRON_SECRET"
+            echo "RC_RUNTIME_HTTP_PROBE=SKIPPED missing=CRON_SECRET"
             exit 0
           fi
           set +e
-          response=$(vercel --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" curl /api/internal/rc-workspace \
+          response=$(curl --silent --show-error --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$PRODUCTION_URL/api/internal/rc-workspace")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          echo "RC_RUNTIME_HTTP_PROBE_EXIT=$status"
+
+      - name: Probe production with linked Vercel curl
+        shell: bash
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "RC_RUNTIME_VERCEL_PROBE=SKIPPED missing=CRON_SECRET"
+            exit 0
+          fi
+          set +e
+          response=$(vercel curl /api/internal/rc-workspace \
             -- \
             --silent \
             --show-error \
@@ -64,60 +89,12 @@ jobs:
           status=$?
           set -e
           printf '%s\n' "$response"
-          echo "RC_RUNTIME_PROBE_EXIT=$status"
+          echo "RC_RUNTIME_VERCEL_PROBE_EXIT=$status"
 
-      - name: List existing marketplace resources
+      - name: List current project marketplace resource
         shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_RESOURCES_BEGIN"
-          vercel integration list --all --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_RESOURCES_END"
-
-      - name: List current project resources
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_PROJECT_RESOURCES_BEGIN"
-          vercel integration list "$VERCEL_PROJECT_NAME" --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_PROJECT_RESOURCES_END"
-
-      - name: List Neon installations
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_NEON_INSTALLATIONS_BEGIN"
-          vercel integration installations --integration neon --format json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_NEON_INSTALLATIONS_END"
-
-      - name: Discover Postgres marketplace products
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_MARKETPLACE_BEGIN"
-          vercel integration discover postgres --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_MARKETPLACE_END"
-
-      - name: Inspect Neon provisioning contract
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_NEON_HELP_BEGIN"
-          vercel integration add neon --help
-          echo "POSTGRES_DISCOVERY_NEON_HELP_END"
-
-      - name: Inspect existing resource connection contract
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_CONNECT_HELP_BEGIN"
-          vercel integration resource connect --help
-          echo "POSTGRES_DISCOVERY_CONNECT_HELP_END"
+        run: vercel integration list "$VERCEL_PROJECT_NAME" --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: List production environment variable names
         shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_PRODUCTION_ENV_BEGIN"
-          vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_PRODUCTION_ENV_END"
-
-      - name: List preview environment variable names
-        shell: bash
-        run: |
-          echo "POSTGRES_DISCOVERY_PREVIEW_ENV_BEGIN"
-          vercel env ls preview --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
-          echo "POSTGRES_DISCOVERY_PREVIEW_ENV_END"
+        run: vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
