@@ -1,0 +1,392 @@
+name: Production Prebuilt Fallback
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/production-prebuilt-fallback.yml"
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact 40-character main SHA to deploy
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY_PREBUILT_PRODUCTION
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: growth-os-production-prebuilt
+  cancel-in-progress: false
+
+env:
+  VERCEL_SCOPE: tehkne-solutions-projects
+  VERCEL_PROJECT_NAME: tehkne-growth-os
+  PRODUCTION_PUBLIC_URL: https://tehkne-growth-os.vercel.app
+
+jobs:
+  validate-prebuilt-preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Require deployment credentials
+        run: |
+          test -n "$VERCEL_TOKEN"
+          test -n "$CRON_SECRET"
+
+      - name: Install dependencies and audit
+        run: |
+          npm ci
+          npm run security:audit
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Pull Preview environment metadata
+        run: vercel pull --yes --environment=preview --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Build Preview artifacts in GitHub Actions
+        run: vercel build --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt Preview artifacts
+        id: deploy
+        shell: bash
+        run: |
+          url=$(vercel deploy --prebuilt --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "PREBUILT_PREVIEW_DEPLOYMENT=$url"
+
+      - name: Verify deployed Preview runtime
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          schema=$(vercel curl /api/internal/schema-readiness \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf 'SCHEMA_RESPONSE=%s\n' "$schema"
+          printf '%s' "$schema" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              if (payload.schemaReady !== true) process.exit(2);
+            });
+          '
+
+          workspace=$(vercel curl /api/internal/rc-workspace \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf 'WORKSPACE_RESPONSE=%s\n' "$workspace"
+          workspace_id=$(printf '%s' "$workspace" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              if (payload.status !== "ready" || typeof payload.workspaceId !== "string") process.exit(2);
+              process.stdout.write(payload.workspaceId);
+            });
+          ')
+
+          readiness=$(vercel curl "/api/internal/production-readiness?workspaceId=$workspace_id" \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf '%s\n' "$readiness"
+          printf '%s' "$readiness" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              const checks = Array.isArray(payload.checks) ? payload.checks : [];
+              const failed = checks.filter((check) => check.status === "fail");
+              console.log(`PREBUILT_PREVIEW_READINESS status=${payload.status ?? "unknown"} fail=${failed.length}`);
+              if (payload.status === "blocked" || failed.length > 0) process.exit(1);
+            });
+          '
+          echo "PREBUILT_PREVIEW=PASS"
+
+  deploy-production-from-issue:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      github.event.issue.title == '[RC] PREBUILT_PRODUCTION_DEPLOY' &&
+      startsWith(github.event.comment.body, '/deploy-prebuilt-production ') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate audited Production approval
+        id: approval
+        shell: bash
+        run: |
+          test -n "$VERCEL_TOKEN"
+          test -n "$CRON_SECRET"
+          expected_sha=$(printf '%s\n' "$COMMENT_BODY" | awk '{print $2}')
+          if ! [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "PREBUILT_APPROVAL=BLOCKED invalid_sha"
+            exit 2
+          fi
+          actual_sha=$(git rev-parse HEAD)
+          if [ "$expected_sha" != "$actual_sha" ]; then
+            echo "PREBUILT_APPROVAL=BLOCKED expected=$expected_sha actual=$actual_sha"
+            exit 2
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
+          echo "PREBUILT_APPROVAL=PASS sha=$actual_sha"
+
+      - name: Install dependencies and re-run release gates
+        run: |
+          npm ci
+          npm run security:audit
+          npm run lint
+          npm run typecheck
+          npm run test
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Pull Production environment metadata
+        run: vercel pull --yes --environment=production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Build Production artifacts in GitHub Actions
+        run: vercel build --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt Production artifacts
+        id: deploy
+        shell: bash
+        run: |
+          url=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "PREBUILT_PRODUCTION_DEPLOYMENT=$url"
+
+      - name: Verify official Production alias targets this deployment
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          attached=false
+          for attempt in $(seq 1 18); do
+            inspect=$(vercel inspect "$DEPLOYMENT_URL" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1 || true)
+            if printf '%s\n' "$inspect" | grep -Fq "$PRODUCTION_PUBLIC_URL"; then
+              attached=true
+              break
+            fi
+            echo "PREBUILT_ALIAS=PENDING attempt=$attempt"
+            sleep 5
+          done
+          if [ "$attached" != "true" ]; then
+            echo "PREBUILT_ALIAS=FAIL"
+            exit 1
+          fi
+          echo "PREBUILT_ALIAS=PASS url=$PRODUCTION_PUBLIC_URL"
+
+      - name: Require Production schema and canonical RC workspace
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          schema=$(vercel curl /api/internal/schema-readiness \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf 'SCHEMA_RESPONSE=%s\n' "$schema"
+          printf '%s' "$schema" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              if (payload.schemaReady !== true) process.exit(2);
+            });
+          '
+
+          workspace=$(vercel curl /api/internal/rc-workspace \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf 'WORKSPACE_RESPONSE=%s\n' "$workspace"
+          workspace_id=$(printf '%s' "$workspace" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              if (payload.status !== "ready" || typeof payload.workspaceId !== "string") process.exit(2);
+              process.stdout.write(payload.workspaceId);
+            });
+          ')
+          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
+          echo "PREBUILT_RUNTIME=READY"
+
+      - name: Smoke published Production alias
+        env:
+          GROWTH_OS_BASE_URL: ${{ env.PRODUCTION_PUBLIC_URL }}
+        run: npm run smoke:rc
+
+      - name: Publish success evidence
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOYED_SHA: ${{ steps.approval.outputs.sha }}
+        run: |
+          body=$(cat <<EOF
+          Prebuilt Production deploy **PASS**.
+
+          - SHA: \`$DEPLOYED_SHA\`
+          - Deployment: \`$DEPLOYMENT_URL\`
+          - Public alias: \`$PRODUCTION_PUBLIC_URL\`
+          - Schema/workspace gate: PASS
+          - Production smoke: PASS
+          - Signature: **Tehkné Solutions**
+          EOF
+          )
+          gh issue comment "$ISSUE_NUMBER" --body "$body"
+          gh issue close "$ISSUE_NUMBER" --reason completed
+
+      - name: Publish NO-GO evidence
+        if: failure()
+        shell: bash
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "Prebuilt Production deploy **NO-GO**. One or more fail-closed gates stopped the deployment/validation. Review this workflow run before retrying. Signature: **Tehkné Solutions**."
+
+  deploy-production-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate manual Production approval
+        shell: bash
+        run: |
+          test "$CONFIRMATION" = "DEPLOY_PREBUILT_PRODUCTION"
+          test -n "$VERCEL_TOKEN"
+          test -n "$CRON_SECRET"
+          if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then exit 2; fi
+          actual_sha=$(git rev-parse HEAD)
+          test "$EXPECTED_SHA" = "$actual_sha"
+          echo "PREBUILT_MANUAL_APPROVAL=PASS sha=$actual_sha"
+
+      - name: Install dependencies and re-run release gates
+        run: |
+          npm ci
+          npm run security:audit
+          npm run lint
+          npm run typecheck
+          npm run test
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link and pull Production environment metadata
+        run: |
+          vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+          vercel pull --yes --environment=production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Build and deploy prebuilt Production artifacts
+        id: deploy
+        shell: bash
+        run: |
+          vercel build --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+          url=$(vercel deploy --prebuilt --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "PREBUILT_PRODUCTION_DEPLOYMENT=$url"
+
+      - name: Verify Production runtime and smoke
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          attached=false
+          for attempt in $(seq 1 18); do
+            inspect=$(vercel inspect "$DEPLOYMENT_URL" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1 || true)
+            if printf '%s\n' "$inspect" | grep -Fq "$PRODUCTION_PUBLIC_URL"; then attached=true; break; fi
+            sleep 5
+          done
+          test "$attached" = "true"
+
+          schema=$(vercel curl /api/internal/schema-readiness --deployment "$DEPLOYMENT_URL" -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
+          printf '%s' "$schema" | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.schemaReady!==true)process.exit(2);});'
+
+          workspace=$(vercel curl /api/internal/rc-workspace --deployment "$DEPLOYMENT_URL" -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
+          workspace_id=$(printf '%s' "$workspace" | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.status!=="ready"||typeof p.workspaceId!=="string")process.exit(2);process.stdout.write(p.workspaceId);});')
+          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
+
+      - name: Smoke published Production alias
+        env:
+          GROWTH_OS_BASE_URL: ${{ env.PRODUCTION_PUBLIC_URL }}
+        run: npm run smoke:rc
