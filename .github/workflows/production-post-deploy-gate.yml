@@ -1,0 +1,179 @@
+name: Production Post-Deploy Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "prisma/**"
+      - "sector-packs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.ts"
+      - "vercel.json"
+      - ".github/workflows/production-post-deploy-gate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-os-production-post-deploy
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PUBLIC_URL: https://tehkne-growth-os.vercel.app
+
+jobs:
+  verify-git-production:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      RC_WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Require runtime validation credential
+        run: test -n "$CRON_SECRET"
+
+      - name: Wait until public alias serves this exact Git SHA
+        id: alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$GITHUB_SHA"
+          matched=false
+          for attempt in $(seq 1 36); do
+            set +e
+            body=$(curl --silent --show-error --fail-with-body "$PRODUCTION_PUBLIC_URL/api/health")
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              actual=$(printf '%s' "$body" | node -e '
+                let b="";
+                process.stdin.on("data", c => b += c);
+                process.stdin.on("end", () => {
+                  try {
+                    const p = JSON.parse(b);
+                    process.stdout.write(typeof p.releaseSha === "string" ? p.releaseSha : "");
+                  } catch {}
+                });
+              ')
+              env_name=$(printf '%s' "$body" | node -e '
+                let b="";
+                process.stdin.on("data", c => b += c);
+                process.stdin.on("end", () => {
+                  try {
+                    const p = JSON.parse(b);
+                    process.stdout.write(typeof p.environment === "string" ? p.environment : "");
+                  } catch {}
+                });
+              ')
+              echo "PRODUCTION_ALIAS attempt=$attempt expected=$expected actual=${actual:-missing} environment=${env_name:-missing}"
+              if [ "$actual" = "$expected" ] && [ "$env_name" = "production" ]; then
+                matched=true
+                break
+              fi
+            else
+              echo "PRODUCTION_ALIAS attempt=$attempt health_unavailable=$status"
+            fi
+            sleep 10
+          done
+          if [ "$matched" != "true" ]; then
+            echo "PRODUCTION_ALIAS=FAIL expected_sha=$expected"
+            exit 1
+          fi
+          echo "PRODUCTION_ALIAS=PASS sha=$expected"
+
+      - name: Install dependencies and security audit
+        run: |
+          npm ci
+          npm run security:audit
+
+      - name: Require Production schema readiness
+        shell: bash
+        run: |
+          schema=$(curl --silent --show-error --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$PRODUCTION_PUBLIC_URL/api/internal/schema-readiness")
+          printf 'SCHEMA_RESPONSE=%s\n' "$schema"
+          printf '%s' "$schema" | node -e '
+            let b="";
+            process.stdin.on("data", c => b += c);
+            process.stdin.on("end", () => {
+              const p = JSON.parse(b);
+              if (p.schemaReady !== true) process.exit(2);
+            });
+          '
+          echo "PRODUCTION_SCHEMA=PASS"
+
+      - name: Resolve canonical RC workspace
+        shell: bash
+        run: |
+          if [ -n "$RC_WORKSPACE_ID" ]; then
+            echo "WORKSPACE_ID=$RC_WORKSPACE_ID" >> "$GITHUB_ENV"
+            echo "PRODUCTION_WORKSPACE=PASS source=secret-override"
+            exit 0
+          fi
+          workspace=$(curl --silent --show-error --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$PRODUCTION_PUBLIC_URL/api/internal/rc-workspace")
+          printf 'WORKSPACE_RESPONSE=%s\n' "$workspace"
+          workspace_id=$(printf '%s' "$workspace" | node -e '
+            let b="";
+            process.stdin.on("data", c => b += c);
+            process.stdin.on("end", () => {
+              const p = JSON.parse(b);
+              if (p.status !== "ready" || typeof p.workspaceId !== "string") process.exit(2);
+              process.stdout.write(p.workspaceId);
+            });
+          ')
+          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
+          echo "PRODUCTION_WORKSPACE=PASS source=runtime"
+
+      - name: Validate Production readiness
+        shell: bash
+        run: |
+          readiness=$(curl --silent --show-error --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "$PRODUCTION_PUBLIC_URL/api/internal/production-readiness?workspaceId=$WORKSPACE_ID")
+          printf '%s\n' "$readiness"
+          printf '%s' "$readiness" | node -e '
+            let b="";
+            process.stdin.on("data", c => b += c);
+            process.stdin.on("end", () => {
+              const p = JSON.parse(b);
+              const checks = Array.isArray(p.checks) ? p.checks : [];
+              const failed = checks.filter(c => c.status === "fail");
+              const warnings = checks.filter(c => c.status === "warning");
+              console.log(`PRODUCTION_READINESS status=${p.status ?? "unknown"} fail=${failed.length} warning=${warnings.length}`);
+              for (const check of checks) console.log(`${String(check.status).toUpperCase()} ${check.key} :: ${check.detail}`);
+              if (p.status === "blocked" || failed.length > 0) process.exit(1);
+            });
+          '
+          echo "PRODUCTION_READINESS=PASS"
+
+      - name: Smoke canonical Production alias
+        env:
+          GROWTH_OS_BASE_URL: ${{ env.PRODUCTION_PUBLIC_URL }}
+        run: npm run smoke:rc
+
+      - name: Publish evidence summary
+        if: always()
+        run: |
+          {
+            echo "## Tehkné Growth OS Production Post-Deploy Gate"
+            echo ""
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Public alias: $PRODUCTION_PUBLIC_URL"
+            echo "- Alias exact-SHA gate: ${{ steps.alias.outcome || 'not-run' }}"
+            echo "- This workflow creates no deployment and mutates no alias."
+            echo "- Signature: Tehkné Solutions"
+          } >> "$GITHUB_STEP_SUMMARY"
