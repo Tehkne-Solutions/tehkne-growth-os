@@ -10,6 +10,10 @@ import {
   type ClientHandoverChecklist,
 } from "@/modules/client-operations/handover-checklist";
 import {
+  loadAuthorizedClientTrackingHealth,
+  type ClientTrackingHealth,
+} from "@/modules/client-operations/tracking-health";
+import {
   AuthorizationDeniedError,
   InvalidSessionError,
   PrismaIdentityRepository,
@@ -22,6 +26,7 @@ import { getDatabase } from "@/shared/db/client";
 
 import { ClientOperationsForm } from "./client-operations-form";
 import { HandoverChecklist } from "./handover-checklist";
+import { TrackingHealthPanel } from "./tracking-health-panel";
 import styles from "./client-operations.module.css";
 
 type SearchValue = string | string[] | undefined;
@@ -38,6 +43,7 @@ type PageState =
       tenant: ExplicitTenant;
       snapshot: ClientOperationsSnapshot;
       handover: ClientHandoverChecklist;
+      trackingHealth: ClientTrackingHealth;
       workspaceName: string;
       clientName: string;
       brandName: string | null;
@@ -53,7 +59,7 @@ export default async function ClientOperationsPage({ searchParams }: PageProps) 
     case "context-required": return <StatePage title="Contexto incompleto" detail="Abra um workspace autorizado antes de acessar o Client Operations." />;
     case "authentication-required": return <StatePage title="Autenticação necessária" detail="Entre novamente no Tehkné Growth OS." />;
     case "forbidden": return <StatePage title="Acesso não autorizado" detail="Sua membership não concede leitura deste workspace." />;
-    case "unavailable": return <StatePage title="Client Operations indisponível" detail="Não foi possível carregar intake/handover. Se este release acabou de ser publicado, confirme as migrations Production antes de usar esta área." />;
+    case "unavailable": return <StatePage title="Client Operations indisponível" detail="Não foi possível carregar intake/handover/tracking. Se este release acabou de ser publicado, confirme as migrations Production antes de usar esta área." />;
     case "ready": return <ReadyPage state={state} />;
   }
 }
@@ -73,12 +79,16 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
     const repository = new PrismaIdentityRepository(database);
     const session = await validateSession(repository, token, secret);
     const parsedTenant = parseTenantContext(tenant);
-    const [snapshot, handover] = await Promise.all([
+    const [snapshot, handover, trackingHealth] = await Promise.all([
       loadAuthorizedClientOperationsSnapshot(
         { database, authorizationStore: repository },
         { userId: session.userId, tenant: parsedTenant },
       ),
       loadAuthorizedClientHandoverChecklist(
+        { database, authorizationStore: repository },
+        { userId: session.userId, tenant: parsedTenant },
+      ),
+      loadAuthorizedClientTrackingHealth(
         { database, authorizationStore: repository },
         { userId: session.userId, tenant: parsedTenant },
       ),
@@ -103,6 +113,7 @@ async function resolveState(params: Record<string, SearchValue>): Promise<PageSt
       tenant,
       snapshot,
       handover,
+      trackingHealth,
       workspaceName: workspace.name,
       clientName: workspace.clientOrganization.name,
       brandName: workspace.brand?.name ?? null,
@@ -123,13 +134,17 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
     ...entry,
     verifiedAt: entry.verifiedAt?.toISOString() ?? null,
   }));
+  const trackingEntries = state.trackingHealth.entries.map((entry) => ({
+    ...entry,
+    assessedAt: entry.assessedAt?.toISOString() ?? null,
+  }));
 
   return <main className={styles.page}>
     <header className={styles.header}>
       <div>
         <p className={styles.eyebrow}>Tehkné Growth OS · Client Operations</p>
         <h1>{state.clientName}</h1>
-        <p>{state.brandName ? `${state.brandName} · ` : ""}{state.workspaceName}. Intake, lifecycle e handover auditáveis sem misturar governança com mutações de mídia.</p>
+        <p>{state.brandName ? `${state.brandName} · ` : ""}{state.workspaceName}. Intake, lifecycle, handover e tracking auditáveis sem misturar governança com mutações de mídia.</p>
       </div>
       <a className={styles.backLink} href={`/command-center?${state.backQuery}`}>Voltar ao Command Center</a>
     </header>
@@ -139,6 +154,7 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
       <article><span>North Star</span><strong>{profile?.northStarMetricId ?? "Não definida"}</strong></article>
       <article><span>Budget mensal</span><strong>{formatMoney(profile?.monthlyMediaBudget ?? null, profile?.financialCurrency ?? state.currency)}</strong></article>
       <article><span>Handover</span><strong>{state.handover.complete ? "COMPLETE" : `${state.handover.verifiedCount}/${state.handover.entries.length} VERIFIED`}</strong></article>
+      <article><span>Tracking</span><strong>{state.trackingHealth.overallStatus}</strong></article>
     </section>
 
     <ClientOperationsForm tenant={state.tenant} profile={profile} defaultCurrency={state.currency} allowedTransitions={allowedTransitions} />
@@ -150,6 +166,15 @@ function ReadyPage({ state }: Readonly<{ state: Extract<PageState, { kind: "read
       verifiedCount={state.handover.verifiedCount}
       notApplicableCount={state.handover.notApplicableCount}
       blockedCount={state.handover.blockedCount}
+    />
+
+    <TrackingHealthPanel
+      tenant={state.tenant}
+      entries={trackingEntries}
+      overallStatus={state.trackingHealth.overallStatus}
+      healthyCount={state.trackingHealth.healthyCount}
+      degradedCount={state.trackingHealth.degradedCount}
+      brokenCount={state.trackingHealth.brokenCount}
     />
 
     <section className={styles.timeline}>
