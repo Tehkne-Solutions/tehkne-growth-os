@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "scripts/rc-workspace-*.sql"
+      - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
       - ".github/workflows/release-candidate-deploy.yml"
       - "docs/releases/RC-1.md"
   pull_request:
     paths:
       - "scripts/rc-workspace-*.sql"
+      - "scripts/psql-database-url.mjs"
       - ".github/workflows/rc-workspace-bootstrap.yml"
       - ".github/workflows/release-candidate-deploy.yml"
       - "docs/releases/RC-1.md"
@@ -89,19 +91,23 @@ jobs:
             sudo apt-get install -y postgresql-client
           fi
 
+      - name: Prepare psql connection URL
+        shell: bash
+        run: echo "PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)" >> "$GITHUB_ENV"
+
       - name: Inspect empty RC state
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
+        run: psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
 
       - name: Apply bootstrap twice to prove idempotency
         shell: bash
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+          psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+          psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
 
       - name: Verify tenant hierarchy and audit evidence
         shell: bash
         run: |
-          workspace_count=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+          workspace_count=$(psql "$PSQL_DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
             SELECT COUNT(*)
             FROM workspaces w
             JOIN client_organizations c ON c.id = w.client_organization_id
@@ -110,16 +116,18 @@ jobs:
               AND c.slug = 'tkn-growth-rc'
               AND w.slug = 'rc-validation';
           ")
-          audit_count=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
+          audit_count=$(psql "$PSQL_DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
             SELECT COUNT(*)
             FROM audit_events
             WHERE action = 'rc.workspace.bootstrap'
               AND resource_type = 'workspace';
           ")
+          resolved_id=$(psql "$PSQL_DATABASE_URL" -At -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql | tail -n 1 | tr -d '\r')
 
           test "$workspace_count" = "1"
           test "$audit_count" = "1"
-          echo "RC_WORKSPACE_SQL=PASS workspace_count=$workspace_count audit_count=$audit_count"
+          test "$resolved_id" = "93000000-0000-4000-8000-000000000001"
+          echo "RC_WORKSPACE_SQL=PASS workspace_count=$workspace_count audit_count=$audit_count workspace_id=$resolved_id"
 
   inspect-or-bootstrap:
     needs: validate-sql
@@ -193,7 +201,8 @@ jobs:
               echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED missing=DATABASE_URL"
               exit 3
             fi
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
+            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
+            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-inspect.sql
           '
           status=$?
           set -e
@@ -221,7 +230,8 @@ jobs:
         shell: bash
         run: |
           vercel env run -e "$TARGET_ENV" -- bash -lc '
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
+            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
+            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-bootstrap.sql
           '
 
       - name: Verify resolved RC workspace
@@ -229,19 +239,12 @@ jobs:
         id: workspace
         shell: bash
         run: |
-          workspace_id=$(vercel env run -e "$TARGET_ENV" -- bash -lc '
-            psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "
-              SELECT w.id::text
-              FROM workspaces w
-              JOIN client_organizations c ON c.id = w.client_organization_id
-              JOIN operator_organizations o ON o.id = w.operator_organization_id
-              WHERE o.slug = '\''tehkne-solutions'\''
-                AND c.slug = '\''tkn-growth-rc'\''
-                AND w.slug = '\''rc-validation'\''
-                AND w.status = '\''ACTIVE'\''
-              LIMIT 1;
-            "
-          ' | tail -n 1 | tr -d '\r')
+          output=$(vercel env run -e "$TARGET_ENV" -- bash -lc '
+            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
+            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql
+          ')
+          printf '%s\n' "$output"
+          workspace_id=$(printf '%s\n' "$output" | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | tail -n 1 || true)
 
           if [ -z "$workspace_id" ]; then
             echo "RC_WORKSPACE_STATUS=missing"
