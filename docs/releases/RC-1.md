@@ -10,7 +10,7 @@ Validate the already-hardened Growth OS build against a real published environme
 
 ## Required environment
 
-- `GROWTH_OS_BASE_URL`: public HTTPS deployment URL.
+- `GROWTH_OS_BASE_URL`: public HTTPS Production URL for the external production smoke. The canonical Production alias is `https://tehkne-growth-os.vercel.app`.
 - `CRON_SECRET`: production/staging scheduler secret.
 - `WORKSPACE_ID`: validation workspace with representative connectors configured; `Release Candidate Deploy` resolves the canonical RC workspace from the deployed runtime when no override is supplied.
 - `VERCEL_TOKEN`: GitHub Actions secret used only by the RC deployment/bootstrap workflows.
@@ -27,15 +27,24 @@ Never commit secret values.
 6. `npm run typecheck`
 7. `npm run test`
 8. `npm run build`
-9. `npm run smoke:rc`
+9. RC runtime smoke for the selected target
 
-`smoke:rc` validates the public surface, required security headers and the authenticated production-readiness endpoint. Any HTTP 5xx, missing mandatory header, failed readiness check or `blocked` readiness status fails the candidate.
+For Production, `npm run smoke:rc` validates the public surface, required security headers and the authenticated production-readiness endpoint on the canonical public alias. Any HTTP 5xx, missing mandatory header, failed readiness check or `blocked` readiness status fails the candidate.
+
+Preview deployments are intentionally protected by Vercel SSO. They are therefore validated through authenticated `vercel curl` requests against the exact immutable deployment rather than being treated as a public URL. The Preview gate enforces the same five mandatory security headers and the same non-blocked production-readiness contract without weakening Deployment Protection.
 
 ## Vercel RC deployment
 
 The GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It targets the Tehkné Solutions Vercel scope, installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, creates a preview or production deployment and records the exact deployment URL.
 
-After deployment, the workflow calls `/api/internal/rc-workspace` on that exact deployment using `vercel curl` and `CRON_SECRET`. Workspace discovery therefore happens inside the deployed runtime, where Sensitive Vercel environment variables such as `DATABASE_URL` are available without exporting their values to GitHub Actions. When the canonical workspace exists, the returned UUID becomes `WORKSPACE_ID` and `npm run smoke:rc` runs against the same deployment.
+After deployment, the workflow calls `/api/internal/schema-readiness` and `/api/internal/rc-workspace` on that exact deployment using authenticated `vercel curl` requests and `CRON_SECRET`. Workspace discovery therefore happens inside the deployed runtime, where Sensitive Vercel environment variables such as `DATABASE_URL` are available without exporting their values to GitHub Actions.
+
+The final smoke differs intentionally by target:
+
+- **Preview:** the immutable deployment remains behind Vercel SSO. The workflow validates its root response, all mandatory security headers and `/api/internal/production-readiness` through Vercel-authenticated requests on that exact deployment.
+- **Production:** the workflow first proves that the canonical public alias `https://tehkne-growth-os.vercel.app` is attached to the newly deployed Production deployment. Only after that alias-to-deployment gate passes does it execute `npm run smoke:rc` against the public alias.
+
+This split prevents two classes of false evidence: a false negative caused by testing a protected deployment URL as if it were public, and a false positive caused by accidentally smoking an older Production alias.
 
 Required GitHub Actions secrets:
 
@@ -98,8 +107,8 @@ This keeps the database credential inside Vercel while preserving explicit human
 
 The RC is not approved from CI alone. Record evidence for each item:
 
-- Public deployment responds over HTTPS.
-- Security headers are present on the published URL.
+- Public Production alias responds over HTTPS.
+- Security headers are present on the published Production alias.
 - Production-readiness returns a non-blocked state for the validation workspace.
 - Scheduler executes with the deployed `CRON_SECRET`.
 - Google connector first-sync completes and persists data.
@@ -141,11 +150,13 @@ Any automated gate fails; readiness is `blocked`; a required connector first-syn
 Before promotion, capture:
 
 - Release commit SHA
-- Deployment URL
+- Immutable deployment URL
+- Canonical Production alias
 - Deployment identifier
 - Validation workspace ID
 - CI run
-- `smoke:rc` output
+- Production `smoke:rc` output
+- Protected Preview smoke output when applicable
 - Scheduler execution evidence
 - Google first-sync evidence
 - Meta first-sync evidence

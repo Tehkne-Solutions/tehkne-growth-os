@@ -41,6 +41,7 @@ jobs:
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
       RC_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+      PRODUCTION_PUBLIC_URL: https://tehkne-growth-os.vercel.app
 
     steps:
       - name: Checkout
@@ -88,7 +89,6 @@ jobs:
           fi
           URL=$(vercel deploy $TARGET_FLAG --yes --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "GROWTH_OS_BASE_URL=$URL" >> "$GITHUB_ENV"
           echo "Release candidate deployed to $URL"
 
       - name: Inspect deployed schema readiness
@@ -199,7 +199,7 @@ jobs:
         run: |
           if [ "${{ steps.schema.outputs.ready }}" = "true" ] && [ -n "$CRON_SECRET" ] && [ -n "$WORKSPACE_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "RC_SMOKE=READY"
+            echo "RC_SMOKE=READY target=$RC_TARGET"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             missing=""
@@ -209,8 +209,96 @@ jobs:
             echo "RC_SMOKE=PENDING missing=$missing"
           fi
 
-      - name: Validate published release candidate
-        if: steps.smoke-readiness.outputs.ready == 'true'
+      - name: Validate protected Preview release candidate
+        id: preview-smoke
+        if: steps.smoke-readiness.outputs.ready == 'true' && env.RC_TARGET == 'preview'
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          headers=$(mktemp)
+          http_status=$(vercel curl / \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --output /dev/null \
+            --dump-header "$headers" \
+            --write-out '%{http_code}')
+
+          echo "RC_PREVIEW_PUBLIC http=$http_status mode=vercel-authenticated"
+          if [ "$http_status" -ge 500 ]; then
+            echo "RC_SMOKE=FAIL failures=public-http:$http_status"
+            exit 1
+          fi
+
+          failures=""
+          grep -Eiq '^x-content-type-options:[[:space:]]*nosniff' "$headers" || failures="$failures header:x-content-type-options"
+          grep -Eiq '^x-frame-options:' "$headers" || failures="$failures header:x-frame-options"
+          grep -Eiq '^referrer-policy:' "$headers" || failures="$failures header:referrer-policy"
+          grep -Eiq '^permissions-policy:' "$headers" || failures="$failures header:permissions-policy"
+          grep -Eiq '^strict-transport-security:' "$headers" || failures="$failures header:strict-transport-security"
+
+          if [ -n "$failures" ]; then
+            echo "RC_SMOKE=FAIL failures=$failures"
+            exit 1
+          fi
+
+          readiness=$(vercel curl "/api/internal/production-readiness?workspaceId=$WORKSPACE_ID" \
+            --deployment "$DEPLOYMENT_URL" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          printf '%s\n' "$readiness"
+
+          printf '%s' "$readiness" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              const payload = JSON.parse(body);
+              const checks = Array.isArray(payload.checks) ? payload.checks : [];
+              const failed = checks.filter((check) => check.status === "fail");
+              const warnings = checks.filter((check) => check.status === "warning");
+              console.log(`RC_READINESS status=${payload.status ?? "unknown"} fail=${failed.length} warning=${warnings.length} signature=${payload.signature ?? "unknown"}`);
+              for (const check of checks) console.log(`${String(check.status).toUpperCase()} ${check.key} :: ${check.detail}`);
+              if (payload.status === "blocked" || failed.length > 0) process.exit(1);
+            });
+          '
+
+          echo "RC_SMOKE=PASS mode=vercel-authenticated-preview headers=5/5"
+
+      - name: Verify official Production alias targets this deployment
+        id: production-alias
+        if: steps.smoke-readiness.outputs.ready == 'true' && env.RC_TARGET == 'production'
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          attached=false
+          for attempt in $(seq 1 12); do
+            inspect=$(vercel inspect "$DEPLOYMENT_URL" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1 || true)
+            if printf '%s\n' "$inspect" | grep -Fq "$PRODUCTION_PUBLIC_URL"; then
+              attached=true
+              break
+            fi
+            echo "RC_PRODUCTION_ALIAS=PENDING attempt=$attempt"
+            sleep 5
+          done
+
+          if [ "$attached" != "true" ]; then
+            echo "RC_PRODUCTION_ALIAS=FAIL expected=$PRODUCTION_PUBLIC_URL deployment=$DEPLOYMENT_URL"
+            exit 1
+          fi
+
+          echo "RC_PRODUCTION_ALIAS=READY url=$PRODUCTION_PUBLIC_URL"
+
+      - name: Validate published Production release candidate
+        id: production-smoke
+        if: steps.smoke-readiness.outputs.ready == 'true' && env.RC_TARGET == 'production'
+        env:
+          GROWTH_OS_BASE_URL: ${{ env.PRODUCTION_PUBLIC_URL }}
         run: npm run smoke:rc
 
       - name: Publish RC summary
@@ -221,10 +309,14 @@ jobs:
             echo ""
             echo "- Target: $RC_TARGET"
             echo "- Deployment: ${{ steps.deploy.outputs.url }}"
+            echo "- Production public alias: $PRODUCTION_PUBLIC_URL"
             echo "- Schema: ${{ steps.schema.outputs.ready == 'true' && 'ready' || 'not-ready' }}"
             echo "- Workspace source: ${{ steps.workspace.outputs.source || 'not-resolved' }}"
             echo "- Workspace: ${{ steps.workspace.outputs.workspace_id || 'not-resolved' }}"
-            echo "- Smoke: ${{ steps.smoke-readiness.outputs.ready == 'true' && 'executed' || 'pending prerequisites' }}"
+            echo "- Smoke prerequisites: ${{ steps.smoke-readiness.outputs.ready == 'true' && 'ready' || 'pending' }}"
+            echo "- Preview smoke: ${{ steps.preview-smoke.outcome || 'not-run' }}"
+            echo "- Production alias gate: ${{ steps.production-alias.outcome || 'not-run' }}"
+            echo "- Production smoke: ${{ steps.production-smoke.outcome || 'not-run' }}"
             echo "- Commit: $GITHUB_SHA"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
