@@ -12,6 +12,7 @@ import type { SecretProvider } from "@/modules/growth-connectors/secret-provider
 import { HubSpotCrmAdapter } from "@/modules/growth-crm/hubspot-adapter";
 import type { HubSpotAttributionPropertyMap } from "@/modules/growth-crm/types";
 import type { TenantContext } from "@/modules/tenancy";
+import { resolveApplicationUrl } from "@/shared/config/env";
 import type { DatabaseClient } from "@/shared/db/client";
 
 export type PaidMediaActivationProvider = "GOOGLE_ADS" | "META_ADS";
@@ -35,8 +36,10 @@ export class GuidedActivationConfigurationError extends Error {}
 export class GuidedActivationValidationError extends Error {}
 
 export function guidedActivationEnvironmentFromProcess(environment: NodeJS.ProcessEnv): GuidedActivationEnvironment {
-  const appUrl = environment.APP_URL;
-  if (!appUrl) throw new GuidedActivationConfigurationError("APP_URL is required for guided activation.");
+  const appUrl = resolveApplicationUrl(environment);
+  if (!appUrl) {
+    throw new GuidedActivationConfigurationError("APP_URL or Vercel application URL is required for guided activation.");
+  }
   return {
     appUrl,
     ...(environment.GOOGLE_ADS_API_VERSION ? { googleApiVersion: environment.GOOGLE_ADS_API_VERSION } : {}),
