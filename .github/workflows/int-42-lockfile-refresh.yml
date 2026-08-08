@@ -1,0 +1,44 @@
+name: INT-42 Lockfile Refresh
+
+on:
+  push:
+    branches:
+      - agent/int-42-provision-before-smoke
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/int-42-provision-before-smoke
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Refresh package lock only
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Verify patched production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Commit lockfile when changed
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already synchronized"
+            exit 0
+          fi
+          git config user.name "Tehkné Solutions Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "security: refresh lockfile for patched nanoid"
+          git push origin HEAD:agent/int-42-provision-before-smoke

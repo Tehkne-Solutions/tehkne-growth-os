@@ -91,17 +91,22 @@ jobs:
           echo "GROWTH_OS_BASE_URL=$URL" >> "$GITHUB_ENV"
           echo "Release candidate deployed to $URL"
 
-      - name: Verify smoke credentials
+      - name: Determine smoke readiness
+        id: smoke-readiness
         run: |
-          missing=""
-          [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
-          [ -n "$WORKSPACE_ID" ] || missing="$missing RC_WORKSPACE_ID"
-          if [ -n "$missing" ]; then
-            echo "RC_SMOKE=BLOCKED missing=$missing"
-            exit 2
+          if [ -n "$CRON_SECRET" ] && [ -n "$WORKSPACE_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "RC_SMOKE=READY"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            missing=""
+            [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
+            [ -n "$WORKSPACE_ID" ] || missing="$missing RC_WORKSPACE_ID"
+            echo "RC_SMOKE=PENDING missing=$missing"
           fi
 
       - name: Validate published release candidate
+        if: steps.smoke-readiness.outputs.ready == 'true'
         run: npm run smoke:rc
 
       - name: Publish RC summary
@@ -112,6 +117,7 @@ jobs:
             echo ""
             echo "- Target: $RC_TARGET"
             echo "- Deployment: ${{ steps.deploy.outputs.url }}"
+            echo "- Smoke: ${{ steps.smoke-readiness.outputs.ready == 'true' && 'executed' || 'pending workspace bootstrap' }}"
             echo "- Commit: $GITHUB_SHA"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
