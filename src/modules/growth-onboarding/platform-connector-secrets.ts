@@ -1,5 +1,6 @@
 import { AuthorizationDeniedError } from "@/modules/identity";
 import type { AuthorizationMembershipStore } from "@/modules/identity/application/contracts";
+import type { AuthorizationMembership } from "@/modules/identity";
 import {
   PostgresEncryptedSecretProvider,
   type SecretPayload,
@@ -40,23 +41,22 @@ const REQUIRED_OPERATOR_PERMISSIONS = Object.freeze([
   "growth.connectors.manage",
 ]);
 
-export async function assertPlatformConnectorSecretManager(
+export async function canManagePlatformConnectorSecrets(
   store: AuthorizationMembershipStore,
   input: Readonly<{ userId: string; operatorOrganizationId: string }>,
-): Promise<void> {
+): Promise<boolean> {
   const memberships = await store.listActiveMemberships(
     input.userId,
     input.operatorOrganizationId,
   );
-  const authorized = memberships.some(
-    (membership) =>
-      membership.scope === "OPERATOR" &&
-      REQUIRED_OPERATOR_PERMISSIONS.every((permission) =>
-        membership.permissionKeys.includes(permission),
-      ),
-  );
+  return memberships.some(isPlatformSecretManagerMembership);
+}
 
-  if (authorized) return;
+export async function assertPlatformConnectorSecretManager(
+  store: AuthorizationMembershipStore,
+  input: Readonly<{ userId: string; operatorOrganizationId: string }>,
+): Promise<void> {
+  if (await canManagePlatformConnectorSecrets(store, input)) return;
 
   await store.recordAuthorizationDenial({
     userId: input.userId,
@@ -130,6 +130,17 @@ export async function configurePlatformConnectorSecret(
       rotated,
     });
   });
+}
+
+function isPlatformSecretManagerMembership(
+  membership: AuthorizationMembership,
+): boolean {
+  return (
+    membership.scope === "OPERATOR" &&
+    REQUIRED_OPERATOR_PERMISSIONS.every((permission) =>
+      membership.permissionKeys.includes(permission),
+    )
+  );
 }
 
 function describeSecret(secret: PlatformConnectorSecretInput): Readonly<{
