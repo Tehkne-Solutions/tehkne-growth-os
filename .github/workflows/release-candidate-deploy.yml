@@ -7,8 +7,6 @@ on:
       - "src/**"
       - "prisma/**"
       - "sector-packs/**"
-      - "scripts/rc-workspace-*.sql"
-      - "scripts/psql-database-url.mjs"
       - "package.json"
       - "package-lock.json"
       - "next.config.ts"
@@ -81,58 +79,6 @@ jobs:
       - name: Link repository to Vercel project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
 
-      - name: Resolve RC workspace
-        id: workspace
-        shell: bash
-        run: |
-          if [ -n "$WORKSPACE_ID" ]; then
-            echo "RC_WORKSPACE=READY source=secret"
-            echo "source=secret" >> "$GITHUB_OUTPUT"
-            echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! command -v psql >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y postgresql-client
-          fi
-
-          set +e
-          output=$(vercel env run -e "$RC_TARGET" -- bash -lc '
-            if [ -z "$DATABASE_URL" ]; then
-              echo "RC_WORKSPACE_ENVIRONMENT=UNCONFIGURED missing=DATABASE_URL"
-              exit 3
-            fi
-            PSQL_DATABASE_URL=$(node scripts/psql-database-url.mjs)
-            psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/rc-workspace-id.sql
-          ')
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-
-          if [ "$status" -eq 3 ]; then
-            echo "RC_WORKSPACE=PENDING environment_unconfigured=$RC_TARGET"
-            echo "source=unconfigured" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$status" -ne 0 ]; then
-            echo "RC_WORKSPACE=FAILED resolver_exit=$status"
-            exit "$status"
-          fi
-
-          workspace_id=$(printf '%s\n' "$output" | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | tail -n 1 || true)
-          if [ -z "$workspace_id" ]; then
-            echo "RC_WORKSPACE=PENDING canonical_workspace_missing"
-            echo "source=database-missing" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
-          echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
-          echo "source=database" >> "$GITHUB_OUTPUT"
-          echo "RC_WORKSPACE=READY source=database"
-
       - name: Deploy release candidate
         id: deploy
         run: |
@@ -144,6 +90,73 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "GROWTH_OS_BASE_URL=$URL" >> "$GITHUB_ENV"
           echo "Release candidate deployed to $URL"
+
+      - name: Resolve RC workspace from deployed runtime
+        id: workspace
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          if [ -n "$WORKSPACE_ID" ]; then
+            echo "RC_WORKSPACE=READY source=secret-override"
+            echo "source=secret-override" >> "$GITHUB_OUTPUT"
+            echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$CRON_SECRET" ]; then
+            echo "RC_WORKSPACE=PENDING missing=CRON_SECRET"
+            echo "source=missing-cron-secret" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          set +e
+          response=$(vercel curl /api/internal/rc-workspace \
+            --deployment "$DEPLOYMENT_URL" \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+
+          printf '%s\n' "$response"
+
+          if [ "$status" -ne 0 ]; then
+            echo "RC_WORKSPACE=UNAVAILABLE runtime_status=$status"
+            echo "source=runtime-unavailable" >> "$GITHUB_OUTPUT"
+            if [ "$RC_TARGET" = "production" ]; then
+              exit "$status"
+            fi
+            exit 0
+          fi
+
+          workspace_id=$(printf '%s' "$response" | node -e '
+            let body="";
+            process.stdin.on("data", chunk => body += chunk);
+            process.stdin.on("end", () => {
+              try {
+                const parsed = JSON.parse(body);
+                if (parsed.status === "ready" && typeof parsed.workspaceId === "string") {
+                  process.stdout.write(parsed.workspaceId);
+                }
+              } catch {}
+            });
+          ')
+
+          if [ -z "$workspace_id" ]; then
+            echo "RC_WORKSPACE=PENDING canonical_workspace_missing"
+            echo "source=runtime-missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "WORKSPACE_ID=$workspace_id" >> "$GITHUB_ENV"
+          echo "workspace_id=$workspace_id" >> "$GITHUB_OUTPUT"
+          echo "source=runtime" >> "$GITHUB_OUTPUT"
+          echo "RC_WORKSPACE=READY source=runtime"
 
       - name: Determine smoke readiness
         id: smoke-readiness
