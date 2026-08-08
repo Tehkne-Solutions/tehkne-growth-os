@@ -13,6 +13,12 @@ export const PLATFORM_CONNECTOR_SECRET_REFS = Object.freeze({
   metaAdsOAuthClient: "growth-connectors/platform/meta-ads/oauth-client",
 } as const);
 
+export type PlatformConnectorSecretRefs = Readonly<{
+  googleAdsDeveloperToken: string;
+  googleAdsOAuthClient: string;
+  metaAdsOAuthClient: string;
+}>;
+
 export type PlatformConnectorSecretKind =
   | "GOOGLE_ADS_DEVELOPER_TOKEN"
   | "GOOGLE_ADS_OAUTH_CLIENT"
@@ -40,6 +46,22 @@ const REQUIRED_OPERATOR_PERMISSIONS = Object.freeze([
   "identity.roles.assign_any",
   "growth.connectors.manage",
 ]);
+
+export function platformConnectorSecretRefsFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): PlatformConnectorSecretRefs {
+  return Object.freeze({
+    googleAdsDeveloperToken:
+      environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF?.trim() ||
+      PLATFORM_CONNECTOR_SECRET_REFS.googleAdsDeveloperToken,
+    googleAdsOAuthClient:
+      environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF?.trim() ||
+      PLATFORM_CONNECTOR_SECRET_REFS.googleAdsOAuthClient,
+    metaAdsOAuthClient:
+      environment.META_ADS_OAUTH_CLIENT_SECRET_REF?.trim() ||
+      PLATFORM_CONNECTOR_SECRET_REFS.metaAdsOAuthClient,
+  });
+}
 
 export async function canManagePlatformConnectorSecrets(
   store: AuthorizationMembershipStore,
@@ -72,12 +94,13 @@ export async function assertPlatformConnectorSecretManager(
 export async function inspectPlatformConnectorSecrets(
   database: DatabaseClient,
   masterKey: string,
+  refs: PlatformConnectorSecretRefs = PLATFORM_CONNECTOR_SECRET_REFS,
 ): Promise<PlatformConnectorSecretStatus> {
   const secrets = new PostgresEncryptedSecretProvider(database, masterKey);
   const [developerToken, googleOAuth, metaOAuth] = await Promise.all([
-    secrets.get(PLATFORM_CONNECTOR_SECRET_REFS.googleAdsDeveloperToken),
-    secrets.get(PLATFORM_CONNECTOR_SECRET_REFS.googleAdsOAuthClient),
-    secrets.get(PLATFORM_CONNECTOR_SECRET_REFS.metaAdsOAuthClient),
+    secrets.get(refs.googleAdsDeveloperToken),
+    secrets.get(refs.googleAdsOAuthClient),
+    secrets.get(refs.metaAdsOAuthClient),
   ]);
 
   return Object.freeze({
@@ -94,10 +117,14 @@ export async function configurePlatformConnectorSecret(
     operatorOrganizationId: string;
     actorUserId: string;
     secret: PlatformConnectorSecretInput;
+    refs?: PlatformConnectorSecretRefs;
     requestId?: string | null;
   }>,
 ): Promise<Readonly<{ kind: PlatformConnectorSecretKind; secretRef: string; rotated: boolean }>> {
-  const descriptor = describeSecret(input.secret);
+  const descriptor = describeSecret(
+    input.secret,
+    input.refs ?? PLATFORM_CONNECTOR_SECRET_REFS,
+  );
 
   return database.$transaction(async (transaction) => {
     const secrets = new PostgresEncryptedSecretProvider(transaction, masterKey);
@@ -143,24 +170,27 @@ function isPlatformSecretManagerMembership(
   );
 }
 
-function describeSecret(secret: PlatformConnectorSecretInput): Readonly<{
+function describeSecret(
+  secret: PlatformConnectorSecretInput,
+  refs: PlatformConnectorSecretRefs,
+): Readonly<{
   secretRef: string;
   payload: SecretPayload;
 }> {
   switch (secret.kind) {
     case "GOOGLE_ADS_DEVELOPER_TOKEN":
       return {
-        secretRef: PLATFORM_CONNECTOR_SECRET_REFS.googleAdsDeveloperToken,
+        secretRef: refs.googleAdsDeveloperToken,
         payload: { developerToken: secret.developerToken },
       };
     case "GOOGLE_ADS_OAUTH_CLIENT":
       return {
-        secretRef: PLATFORM_CONNECTOR_SECRET_REFS.googleAdsOAuthClient,
+        secretRef: refs.googleAdsOAuthClient,
         payload: { clientId: secret.clientId, clientSecret: secret.clientSecret },
       };
     case "META_ADS_OAUTH_CLIENT":
       return {
-        secretRef: PLATFORM_CONNECTOR_SECRET_REFS.metaAdsOAuthClient,
+        secretRef: refs.metaAdsOAuthClient,
         payload: { clientId: secret.clientId, clientSecret: secret.clientSecret },
       };
   }
