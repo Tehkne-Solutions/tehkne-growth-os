@@ -15,12 +15,21 @@ import {
   loadPendingPaidMediaActivation,
   type PendingPaidMediaActivation,
 } from "@/modules/growth-onboarding/guided-activation";
+import {
+  canManagePlatformConnectorSecrets,
+  inspectPlatformConnectorSecrets,
+  type PlatformConnectorSecretStatus,
+} from "@/modules/growth-onboarding/platform-connector-secrets";
 import { auditProductionReadiness } from "@/modules/growth-operations/production-readiness";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
 
-import { HubSpotActivationForm, PaidMediaActivationControls } from "./activation-controls";
+import {
+  HubSpotActivationForm,
+  PaidMediaActivationControls,
+  PlatformConnectorCredentialsForm,
+} from "./activation-controls";
 import styles from "./page.module.css";
 
 type SearchValue = string | string[] | undefined;
@@ -39,6 +48,8 @@ type State =
       productionAudit: Awaited<ReturnType<typeof auditProductionReadiness>>;
       canManagePaid: boolean;
       canManageCrm: boolean;
+      canManagePlatformSecrets: boolean;
+      platformSecretStatus: PlatformConnectorSecretStatus | null;
       pending: PendingPaidMediaActivation | null;
     };
 
@@ -109,6 +120,12 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
         </ol>
       </section>
 
+      <PlatformConnectorCredentialsForm
+        operatorOrganizationId={tenant.operatorOrganizationId}
+        canManage={state.canManagePlatformSecrets}
+        status={state.platformSecretStatus}
+      />
+
       <PaidMediaActivationControls
         tenant={tenant}
         returnTo={setupHref}
@@ -122,6 +139,7 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
         <div><p className={styles.eyebrow}>Activation Checklist</p><h2>Critério mínimo para produção</h2></div>
         <ol>
           <li>Vault criptografado, sessão e autenticação do scheduler configurados.</li>
+          <li>Credenciais de plataforma Google/Meta armazenadas no vault por um operador autorizado; nenhum segredo é persistido na UI.</li>
           <li>OAuth concluído e conta Google Ads/Meta Ads escolhida explicitamente.</li>
           <li>HubSpot validado em leitura com Portal ID e mapa de propriedades de atribuição.</li>
           <li>Todas as conexões ACTIVE com primeira sincronização, watermark e freshness válidos.</li>
@@ -152,12 +170,29 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
     const session = await validateSession(repository, token, secret);
     const tenant = parseTenantContext({ operatorOrganizationId, clientOrganizationId, workspaceId, ...(brandId ? { brandId } : {}) });
     await authorize(repository, { userId: session.userId, tenant, permission: "growth.command_center.read" });
-    const canManagePaid = await hasPermission(repository, session.userId, tenant, "growth.connectors.manage");
-    const canManageCrm = await hasPermission(repository, session.userId, tenant, "growth.crm.manage");
+    const [canManagePaid, canManageCrm, canManagePlatformSecrets] = await Promise.all([
+      hasPermission(repository, session.userId, tenant, "growth.connectors.manage"),
+      hasPermission(repository, session.userId, tenant, "growth.crm.manage"),
+      canManagePlatformConnectorSecrets(repository, {
+        userId: session.userId,
+        operatorOrganizationId,
+      }),
+    ]);
     const [readiness, productionAudit] = await Promise.all([
       loadUnifiedOnboardingReadiness(database, workspaceId, process.env),
       auditProductionReadiness(database, workspaceId, process.env),
     ]);
+    let platformSecretStatus: PlatformConnectorSecretStatus | null = null;
+    if (canManagePlatformSecrets && process.env.CONNECTOR_SECRET_MASTER_KEY) {
+      try {
+        platformSecretStatus = await inspectPlatformConnectorSecrets(
+          database,
+          process.env.CONNECTOR_SECRET_MASTER_KEY,
+        );
+      } catch {
+        platformSecretStatus = null;
+      }
+    }
     let pending: PendingPaidMediaActivation | null = null;
     if (oauthAttemptId && canManagePaid && process.env.CONNECTOR_SECRET_MASTER_KEY) {
       try {
@@ -182,6 +217,8 @@ async function resolveState(params: Record<string, SearchValue>): Promise<State>
       productionAudit,
       canManagePaid,
       canManageCrm,
+      canManagePlatformSecrets,
+      platformSecretStatus,
       pending,
     };
   } catch (error) {

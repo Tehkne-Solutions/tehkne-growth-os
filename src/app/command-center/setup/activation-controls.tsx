@@ -18,6 +18,17 @@ type PendingActivation = {
   accounts: readonly { externalAccountId: string; displayName: string; managerAccountId?: string }[];
 };
 
+type PlatformSecretStatus = {
+  googleAdsDeveloperToken: boolean;
+  googleAdsOAuthClient: boolean;
+  metaAdsOAuthClient: boolean;
+};
+
+type PlatformSecretKind =
+  | "GOOGLE_ADS_DEVELOPER_TOKEN"
+  | "GOOGLE_ADS_OAUTH_CLIENT"
+  | "META_ADS_OAUTH_CLIENT";
+
 export function PaidMediaActivationControls({
   tenant,
   returnTo,
@@ -101,6 +112,103 @@ export function PaidMediaActivationControls({
   );
 }
 
+export function PlatformConnectorCredentialsForm({
+  operatorOrganizationId,
+  canManage,
+  status,
+}: Readonly<{
+  operatorOrganizationId: string;
+  canManage: boolean;
+  status: PlatformSecretStatus | null;
+}>) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<PlatformSecretKind | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit(kind: PlatformSecretKind, formData: FormData) {
+    setBusy(kind);
+    setMessage(null);
+    const value = (name: string) => String(formData.get(name) ?? "").trim();
+    const secret = kind === "GOOGLE_ADS_DEVELOPER_TOKEN"
+      ? { operatorOrganizationId, kind, developerToken: value("developerToken") }
+      : {
+          operatorOrganizationId,
+          kind,
+          clientId: value("clientId"),
+          clientSecret: value("clientSecret"),
+        };
+
+    try {
+      const response = await fetch("/api/growth/setup/platform-secrets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(secret),
+      });
+      const payload = await response.json() as {
+        configured?: boolean;
+        rotated?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.configured) {
+        throw new Error(payload.error ?? "Falha ao armazenar credencial de plataforma.");
+      }
+      setMessage(payload.rotated
+        ? "Credencial rotacionada no vault criptografado e registrada na auditoria."
+        : "Credencial armazenada no vault criptografado e registrada na auditoria.");
+      router.refresh();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Falha ao armazenar credencial de plataforma.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!canManage) return null;
+
+  return (
+    <section className={styles.activationPanel}>
+      <div className={styles.activationHeader}>
+        <div>
+          <p className={styles.eyebrow}>Platform Credential Vault</p>
+          <h2>Credenciais Google Ads e Meta Ads</h2>
+          <p>Somente administradores no escopo OPERATOR podem gravar ou rotacionar estas credenciais. Valores atuais nunca são exibidos de volta pela aplicação.</p>
+        </div>
+      </div>
+
+      <div className={styles.accountPicker}>
+        <h3>Google Ads · Developer Token</h3>
+        <p>{credentialState(status?.googleAdsDeveloperToken)}</p>
+        <form action={(formData) => void submit("GOOGLE_ADS_DEVELOPER_TOKEN", formData)} className={styles.hubspotForm}>
+          <label className={styles.wide}>Developer Token<input name="developerToken" type="password" required autoComplete="off" placeholder="Armazenado somente no vault AES-256-GCM" /></label>
+          <button type="submit" disabled={busy !== null}>{busy === "GOOGLE_ADS_DEVELOPER_TOKEN" ? "Gravando…" : status?.googleAdsDeveloperToken ? "Rotacionar Developer Token" : "Armazenar Developer Token"}</button>
+        </form>
+      </div>
+
+      <div className={styles.accountPicker}>
+        <h3>Google Ads · OAuth Client</h3>
+        <p>{credentialState(status?.googleAdsOAuthClient)}</p>
+        <form action={(formData) => void submit("GOOGLE_ADS_OAUTH_CLIENT", formData)} className={styles.hubspotForm}>
+          <label>Client ID<input name="clientId" required autoComplete="off" /></label>
+          <label>Client Secret<input name="clientSecret" type="password" required autoComplete="off" /></label>
+          <button type="submit" disabled={busy !== null}>{busy === "GOOGLE_ADS_OAUTH_CLIENT" ? "Gravando…" : status?.googleAdsOAuthClient ? "Rotacionar OAuth Google" : "Armazenar OAuth Google"}</button>
+        </form>
+      </div>
+
+      <div className={styles.accountPicker}>
+        <h3>Meta Ads · OAuth App</h3>
+        <p>{credentialState(status?.metaAdsOAuthClient)}</p>
+        <form action={(formData) => void submit("META_ADS_OAUTH_CLIENT", formData)} className={styles.hubspotForm}>
+          <label>App ID / Client ID<input name="clientId" required autoComplete="off" /></label>
+          <label>App Secret<input name="clientSecret" type="password" required autoComplete="off" /></label>
+          <button type="submit" disabled={busy !== null}>{busy === "META_ADS_OAUTH_CLIENT" ? "Gravando…" : status?.metaAdsOAuthClient ? "Rotacionar OAuth Meta" : "Armazenar OAuth Meta"}</button>
+        </form>
+      </div>
+
+      {message ? <p className={styles.formMessage} role="status">{message}</p> : null}
+    </section>
+  );
+}
+
 export function HubSpotActivationForm({ tenant, canManage }: Readonly<{ tenant: Tenant; canManage: boolean }>) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -165,4 +273,10 @@ export function HubSpotActivationForm({ tenant, canManage }: Readonly<{ tenant: 
       {message ? <p className={styles.formMessage} role="status">{message}</p> : null}
     </section>
   );
+}
+
+function credentialState(value: boolean | undefined): string {
+  if (value === true) return "Configurada no vault. Para alterar, informe um novo valor; o anterior nunca é exibido.";
+  if (value === false) return "Ausente no vault.";
+  return "Status do vault indisponível nesta renderização.";
 }
