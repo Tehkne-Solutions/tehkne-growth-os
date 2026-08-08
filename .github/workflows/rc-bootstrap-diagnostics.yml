@@ -77,7 +77,7 @@ jobs:
       - name: Link canonical Vercel project
         run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" >/dev/null
 
-      - name: Diagnose Production provider infrastructure
+      - name: Diagnose Production provider environment
         shell: bash
         run: |
           set -euo pipefail
@@ -99,53 +99,54 @@ jobs:
             printf '%s' "$result"
           }
 
-          google_missing=$(missing_names \
-            CONNECTOR_SECRET_MASTER_KEY \
-            GOOGLE_ADS_API_VERSION \
-            GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF \
-            GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF)
-          meta_missing=$(missing_names \
-            CONNECTOR_SECRET_MASTER_KEY \
-            META_GRAPH_API_VERSION \
-            META_ADS_OAUTH_CLIENT_SECRET_REF)
+          google_missing=$(missing_names CONNECTOR_SECRET_MASTER_KEY GOOGLE_ADS_API_VERSION)
+          meta_missing=$(missing_names CONNECTOR_SECRET_MASTER_KEY META_GRAPH_API_VERSION)
           hubspot_missing=$(missing_names CONNECTOR_SECRET_MASTER_KEY)
 
           if [ -z "$google_missing" ]; then
-            echo "RC_PROVIDER_INFRA GOOGLE_ADS=ready"
-            google_status=ready
+            echo "RC_PROVIDER_ENV GOOGLE_ADS=ready credentials=runtime-vault"
+            google_status="environment ready; credentials validated by runtime vault readiness"
           else
-            echo "RC_PROVIDER_INFRA GOOGLE_ADS=missing names=$google_missing"
+            echo "RC_PROVIDER_ENV GOOGLE_ADS=missing names=$google_missing"
             google_status="missing: $google_missing"
           fi
 
           if [ -z "$meta_missing" ]; then
-            echo "RC_PROVIDER_INFRA META_ADS=ready"
-            meta_status=ready
+            echo "RC_PROVIDER_ENV META_ADS=ready credentials=runtime-vault"
+            meta_status="environment ready; credentials validated by runtime vault readiness"
           else
-            echo "RC_PROVIDER_INFRA META_ADS=missing names=$meta_missing"
+            echo "RC_PROVIDER_ENV META_ADS=missing names=$meta_missing"
             meta_status="missing: $meta_missing"
           fi
 
           if [ -z "$hubspot_missing" ]; then
-            echo "RC_PROVIDER_INFRA HUBSPOT=ready"
+            echo "RC_PROVIDER_ENV HUBSPOT=ready credentials=connection-vault"
             hubspot_status=ready
           else
-            echo "RC_PROVIDER_INFRA HUBSPOT=missing names=$hubspot_missing"
+            echo "RC_PROVIDER_ENV HUBSPOT=missing names=$hubspot_missing"
             hubspot_status="missing: $hubspot_missing"
           fi
 
+          for override in GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF META_ADS_OAUTH_CLIENT_SECRET_REF; do
+            if has_env "$override"; then
+              echo "RC_PROVIDER_REF_OVERRIDE $override=configured"
+            else
+              echo "RC_PROVIDER_REF_OVERRIDE $override=canonical-default"
+            fi
+          done
+
           if has_env OPERATIONS_ALERT_WEBHOOK_URL; then
-            echo "RC_PROVIDER_INFRA OPERATIONS_ALERT_WEBHOOK_URL=configured"
+            echo "RC_PROVIDER_ENV OPERATIONS_ALERT_WEBHOOK_URL=configured"
             webhook_status=configured
           else
-            echo "RC_PROVIDER_INFRA OPERATIONS_ALERT_WEBHOOK_URL=missing"
+            echo "RC_PROVIDER_ENV OPERATIONS_ALERT_WEBHOOK_URL=missing"
             webhook_status=missing
           fi
 
           {
             echo "## Tehkné Growth OS RC bootstrap"
             echo ""
-            echo "Only configured/missing status and expected variable names are reported; environment values are never read or printed."
+            echo "Only configured/missing status and expected variable names are reported; environment values are never read or printed. Provider credential presence is validated inside the application against the encrypted runtime vault."
             echo ""
             echo "### GitHub release prerequisites"
             echo "- VERCEL_TOKEN: configured"
@@ -153,10 +154,11 @@ jobs:
             echo "- RC_WORKSPACE_ID: $([ -n "$RC_WORKSPACE_ID" ] && echo optional override configured || echo runtime discovery)"
             echo "- GROWTH_OS_SCHEDULER_URL: $([ -n "$GROWTH_OS_SCHEDULER_URL" ] && echo configured || echo optional missing)"
             echo ""
-            echo "### Vercel Production provider infrastructure"
+            echo "### Vercel Production environment"
             echo "- Google Ads: $google_status"
             echo "- Meta Ads: $meta_status"
             echo "- HubSpot vault: $hubspot_status"
+            echo "- Secret-ref overrides: optional; canonical vault refs are used when absent"
             echo "- Operations webhook: $webhook_status"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
