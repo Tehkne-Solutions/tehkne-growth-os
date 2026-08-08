@@ -1,0 +1,91 @@
+name: INT-44 PostgreSQL Discovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-44-postgres-discovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  discover-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Vercel credential
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "POSTGRES_DISCOVERY=BLOCKED missing=VERCEL_TOKEN"
+            exit 2
+          fi
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Resolve current production deployment
+        shell: bash
+        run: vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Probe production schema readiness
+        shell: bash
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "SCHEMA_RUNTIME_PROBE=SKIPPED missing=CRON_SECRET"
+            exit 0
+          fi
+          set +e
+          response=$(vercel curl /api/internal/schema-readiness \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          echo "SCHEMA_RUNTIME_PROBE_EXIT=$status"
+
+      - name: Probe production RC workspace
+        shell: bash
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "RC_RUNTIME_PROBE=SKIPPED missing=CRON_SECRET"
+            exit 0
+          fi
+          set +e
+          response=$(vercel curl /api/internal/rc-workspace \
+            -- \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --header "Authorization: Bearer $CRON_SECRET")
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          echo "RC_RUNTIME_PROBE_EXIT=$status"
+
+      - name: Confirm existing Neon resource
+        shell: bash
+        run: vercel integration list "$VERCEL_PROJECT_NAME" --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: Confirm production environment variable names
+        shell: bash
+        run: vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
