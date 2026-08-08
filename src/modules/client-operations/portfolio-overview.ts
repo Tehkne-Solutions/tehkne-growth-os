@@ -8,13 +8,7 @@ import {
   type ClientTrackingHealthItem,
 } from "./tracking-health";
 
-export const CLIENT_PORTFOLIO_ATTENTION_STATES = [
-  "NO_ACTION",
-  "WATCH",
-  "ACTION_REQUIRED",
-  "CRITICAL",
-] as const;
-
+export const CLIENT_PORTFOLIO_ATTENTION_STATES = ["NO_ACTION", "WATCH", "ACTION_REQUIRED", "CRITICAL"] as const;
 export type ClientPortfolioAttentionState = (typeof CLIENT_PORTFOLIO_ATTENTION_STATES)[number];
 
 export type ClientPortfolioRow = Readonly<{
@@ -57,48 +51,23 @@ type WorkspaceIdentity = Readonly<{
   clientOrganization: Readonly<{ name: string }>;
   brand: Readonly<{ name: string }> | null;
 }>;
-
 type ProfileRow = Readonly<{ workspaceId: string; lifecycleState: string }>;
-type HandoverAggregateRow = Readonly<{
-  workspaceId: string;
-  verified: number;
-  notApplicable: number;
-  blocked: number;
-  pending: number;
-  total: number;
-}>;
-type ConnectorAggregateRow = Readonly<{
-  workspaceId: string;
-  activeConnectors: number;
-  latestSuccessAt: Date | null;
-}>;
-type ActionAggregateRow = Readonly<{
-  workspaceId: string;
-  openActions: number;
-  inProgressActions: number;
-}>;
+type HandoverAggregateRow = Readonly<{ workspaceId: string; verified: number; notApplicable: number; blocked: number; pending: number; total: number }>;
+type ConnectorAggregateRow = Readonly<{ workspaceId: string; activeConnectors: number; latestSuccessAt: Date | null }>;
+type ActionAggregateRow = Readonly<{ workspaceId: string; openActions: number; inProgressActions: number }>;
 
 export async function loadAuthorizedClientPortfolioOverview(
-  dependencies: Readonly<{
-    database: DatabaseClient;
-    authorizationStore: AuthorizationMembershipStore;
-  }>,
-  input: Readonly<{
-    userId: string;
-    operatorOrganizationId: string;
-  }>,
+  dependencies: Readonly<{ database: DatabaseClient; authorizationStore: AuthorizationMembershipStore }>,
+  input: Readonly<{ userId: string; operatorOrganizationId: string }>,
   now = new Date(),
 ): Promise<ClientPortfolioOverview> {
   const authorized = await listAuthorizedCommandCenterWorkspaces(dependencies, input);
   const workspaceIds = authorized.map((workspace) => workspace.id);
   if (workspaceIds.length === 0) return emptyOverview();
 
+  const workspaceIdArray = `{${workspaceIds.join(",")}}`;
   const workspaceIdentities = await dependencies.database.workspace.findMany({
-    where: {
-      id: { in: workspaceIds },
-      status: "ACTIVE",
-      operatorOrganizationId: input.operatorOrganizationId,
-    },
+    where: { id: { in: workspaceIds }, status: "ACTIVE", operatorOrganizationId: input.operatorOrganizationId },
     select: {
       id: true,
       name: true,
@@ -110,12 +79,11 @@ export async function loadAuthorizedClientPortfolioOverview(
     },
   }) as WorkspaceIdentity[];
 
-  const idArray = workspaceIds;
   const [profiles, handover, trackingRows, connectors, actions, globalAlerts] = await Promise.all([
     dependencies.database.$queryRaw<ProfileRow[]>`
       SELECT workspace_id AS "workspaceId", lifecycle_state::text AS "lifecycleState"
       FROM growth_client_profiles
-      WHERE workspace_id = ANY(${idArray}::uuid[])
+      WHERE workspace_id = ANY(${workspaceIdArray}::uuid[])
     `,
     dependencies.database.$queryRaw<HandoverAggregateRow[]>`
       SELECT
@@ -126,39 +94,31 @@ export async function loadAuthorizedClientPortfolioOverview(
         COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS'))::int AS pending,
         COUNT(*)::int AS total
       FROM growth_client_handover_items
-      WHERE workspace_id = ANY(${idArray}::uuid[])
+      WHERE workspace_id = ANY(${workspaceIdArray}::uuid[])
       GROUP BY workspace_id
     `,
     dependencies.database.$queryRaw<ClientTrackingHealthItem[]>`
-      SELECT
-        workspace_id AS "workspaceId",
-        item_key AS "itemKey",
-        status::text AS status,
-        evidence_reference AS "evidenceReference",
-        assessed_by_user_id AS "assessedByUserId",
-        assessed_at AS "assessedAt",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
+      SELECT workspace_id AS "workspaceId", item_key AS "itemKey", status::text AS status,
+        evidence_reference AS "evidenceReference", assessed_by_user_id AS "assessedByUserId",
+        assessed_at AS "assessedAt", created_at AS "createdAt", updated_at AS "updatedAt"
       FROM growth_client_tracking_health_items
-      WHERE workspace_id = ANY(${idArray}::uuid[])
+      WHERE workspace_id = ANY(${workspaceIdArray}::uuid[])
     `,
     dependencies.database.$queryRaw<ConnectorAggregateRow[]>`
-      SELECT
-        c.workspace_id AS "workspaceId",
+      SELECT c.workspace_id AS "workspaceId",
         COUNT(*) FILTER (WHERE c.status = 'ACTIVE')::int AS "activeConnectors",
         MAX(cp.last_success_at) AS "latestSuccessAt"
       FROM growth_connector_connections c
       LEFT JOIN growth_connector_checkpoints cp ON cp.connection_id = c.id
-      WHERE c.workspace_id = ANY(${idArray}::uuid[])
+      WHERE c.workspace_id = ANY(${workspaceIdArray}::uuid[])
       GROUP BY c.workspace_id
     `,
     dependencies.database.$queryRaw<ActionAggregateRow[]>`
-      SELECT
-        workspace_id AS "workspaceId",
+      SELECT workspace_id AS "workspaceId",
         COUNT(*) FILTER (WHERE status IN ('OPEN','ACCEPTED'))::int AS "openActions",
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS "inProgressActions"
       FROM growth_action_items
-      WHERE workspace_id = ANY(${idArray}::uuid[])
+      WHERE workspace_id = ANY(${workspaceIdArray}::uuid[])
       GROUP BY workspace_id
     `,
     listControlPlaneAlerts(dependencies.database, now),
@@ -169,10 +129,7 @@ export async function loadAuthorizedClientPortfolioOverview(
   const connectorByWorkspace = new Map(connectors.map((row) => [row.workspaceId, row]));
   const actionByWorkspace = new Map(actions.map((row) => [row.workspaceId, row]));
   const trackingByWorkspace = groupBy(trackingRows, (row) => row.workspaceId);
-  const alertsByWorkspace = groupBy(
-    globalAlerts.filter((alert) => workspaceIds.includes(alert.workspaceId)),
-    (alert) => alert.workspaceId,
-  );
+  const alertsByWorkspace = groupBy(globalAlerts.filter((alert) => workspaceIds.includes(alert.workspaceId)), (alert) => alert.workspaceId);
 
   const rows = workspaceIdentities.map((workspace) => {
     const profile = profileByWorkspace.get(workspace.id);
@@ -181,18 +138,13 @@ export async function loadAuthorizedClientPortfolioOverview(
     const connector = connectorByWorkspace.get(workspace.id);
     const action = actionByWorkspace.get(workspace.id);
     const alerts = alertsByWorkspace.get(workspace.id) ?? [];
-    const connectorCriticalAlerts = alerts.filter((alert) =>
-      alert.reason === "connection_error" || alert.reason === "repeated_failures",
-    ).length;
+    const connectorCriticalAlerts = alerts.filter((alert) => alert.reason === "connection_error" || alert.reason === "repeated_failures").length;
     const handoverTotal = handoverRow?.total ?? 0;
     const handoverVerified = handoverRow?.verified ?? 0;
     const handoverNotApplicable = handoverRow?.notApplicable ?? 0;
     const handoverBlocked = handoverRow?.blocked ?? 0;
     const handoverPending = handoverRow?.pending ?? 13;
-    const handoverComplete = handoverTotal === 13
-      && handoverBlocked === 0
-      && handoverPending === 0
-      && handoverVerified + handoverNotApplicable === 13;
+    const handoverComplete = handoverTotal === 13 && handoverBlocked === 0 && handoverPending === 0 && handoverVerified + handoverNotApplicable === 13;
 
     const attention = classifyClientPortfolioAttention({
       lifecycleState: profile?.lifecycleState ?? null,
@@ -234,12 +186,7 @@ export async function loadAuthorizedClientPortfolioOverview(
 
   return {
     rows,
-    counts: {
-      NO_ACTION: rows.filter((row) => row.attention === "NO_ACTION").length,
-      WATCH: rows.filter((row) => row.attention === "WATCH").length,
-      ACTION_REQUIRED: rows.filter((row) => row.attention === "ACTION_REQUIRED").length,
-      CRITICAL: rows.filter((row) => row.attention === "CRITICAL").length,
-    },
+    counts: Object.fromEntries(CLIENT_PORTFOLIO_ATTENTION_STATES.map((state) => [state, rows.filter((row) => row.attention === state).length])) as Record<ClientPortfolioAttentionState, number>,
   };
 }
 
@@ -256,7 +203,6 @@ export function classifyClientPortfolioAttention(input: Readonly<{
   const critical: string[] = [];
   const actionRequired: string[] = [];
   const watch: string[] = [];
-
   if (input.trackingStatus === "BROKEN") critical.push("tracking_broken");
   if (input.connectorCriticalAlerts > 0) critical.push("critical_connector_alert");
   if (critical.length > 0) return { state: "CRITICAL", reasons: critical };
@@ -273,20 +219,12 @@ export function classifyClientPortfolioAttention(input: Readonly<{
   if (input.trackingStatus === "UNKNOWN" || input.trackingStatus === "PENDING") watch.push("tracking_unverified");
   if (input.lifecycleState === "PAUSED" || input.lifecycleState === "OFFBOARDING") watch.push("lifecycle_non_operating");
   if (watch.length > 0) return { state: "WATCH", reasons: watch };
-
   return { state: "NO_ACTION", reasons: [] };
 }
 
 function comparePortfolioRows(a: ClientPortfolioRow, b: ClientPortfolioRow) {
-  const rank: Record<ClientPortfolioAttentionState, number> = {
-    CRITICAL: 0,
-    ACTION_REQUIRED: 1,
-    WATCH: 2,
-    NO_ACTION: 3,
-  };
-  return rank[a.attention] - rank[b.attention]
-    || a.clientName.localeCompare(b.clientName, "pt-BR")
-    || a.workspaceName.localeCompare(b.workspaceName, "pt-BR");
+  const rank: Record<ClientPortfolioAttentionState, number> = { CRITICAL: 0, ACTION_REQUIRED: 1, WATCH: 2, NO_ACTION: 3 };
+  return rank[a.attention] - rank[b.attention] || a.clientName.localeCompare(b.clientName, "pt-BR") || a.workspaceName.localeCompare(b.workspaceName, "pt-BR");
 }
 
 function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
@@ -301,8 +239,5 @@ function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
 }
 
 function emptyOverview(): ClientPortfolioOverview {
-  return {
-    rows: [],
-    counts: { NO_ACTION: 0, WATCH: 0, ACTION_REQUIRED: 0, CRITICAL: 0 },
-  };
+  return { rows: [], counts: { NO_ACTION: 0, WATCH: 0, ACTION_REQUIRED: 0, CRITICAL: 0 } };
 }
