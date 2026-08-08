@@ -22,6 +22,7 @@ import {
   type PlatformConnectorSecretStatus,
 } from "@/modules/growth-onboarding/platform-connector-secrets";
 import { auditProductionReadiness } from "@/modules/growth-operations/production-readiness";
+import { buildReleaseCapabilityMatrix } from "@/modules/growth-operations/release-capability-matrix";
 import { parseTenantContext } from "@/modules/tenancy";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -69,6 +70,7 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
   }
 
   const { tenant, readiness, productionAudit } = state;
+  const releaseMatrix = buildReleaseCapabilityMatrix(readiness, productionAudit);
   const connectorsHref = href("/command-center/connectors", tenant);
   const setupHref = href("/command-center/setup", tenant);
   const activationError = first(params.activationError);
@@ -76,9 +78,9 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Production Readiness · INT-39</p>
+          <p className={styles.eyebrow}>Production Readiness · INT-73</p>
           <h1>Conectar não basta: cada integração precisa provar a primeira sincronização.</h1>
-          <p>O Setup agora separa conexão ACTIVE de conexão VERIFIED e audita automaticamente scheduler, vault, ambiente, mídia e CRM antes do rollout.</p>
+          <p>O Setup separa o núcleo certificado das integrações externas ainda pendentes, sem relaxar o gate estrito de produção.</p>
         </div>
         <div className={styles.progress}><strong>{readiness.completionPercent}%</strong><span>{readiness.verifiedProviders}/{readiness.totalProviders} providers verificados</span></div>
       </header>
@@ -87,8 +89,23 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
 
       <section className={styles.summary} aria-label="Readiness geral">
         <article><span>Produção</span><strong>{productionAudit.status}</strong></article>
-        <article><span>Conectados</span><strong>{readiness.connectedProviders}/{readiness.totalProviders}</strong></article>
-        <article><span>First-sync verificado</span><strong>{readiness.verifiedProviders}/{readiness.totalProviders}</strong></article>
+        <article><span>Core certificado</span><strong>{releaseMatrix.coreCertified ? "SIM" : "NÃO"}</strong></article>
+        <article><span>Pendências externas</span><strong>{releaseMatrix.externallyPending}</strong></article>
+      </section>
+
+      <section className={styles.checklist} aria-label="Matriz de capacidades do release">
+        <div>
+          <p className={styles.eyebrow}>Release Capability Matrix</p>
+          <h2>Certificação por capacidade</h2>
+          <p>Credenciais externas podem permanecer pendentes sem serem tratadas como concluídas. O gate estrito continua exigindo first-sync real antes de certificar o provider.</p>
+        </div>
+        <ol>
+          {releaseMatrix.capabilities.map((capability) => (
+            <li key={capability.key}>
+              <strong>{capability.state} · {capability.label}</strong> — {capability.detail}
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section className={styles.grid}>
@@ -137,7 +154,7 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
       <HubSpotActivationForm tenant={tenant} canManage={state.canManageCrm} />
 
       <section className={styles.checklist}>
-        <div><p className={styles.eyebrow}>Activation Checklist</p><h2>Critério mínimo para produção</h2></div>
+        <div><p className={styles.eyebrow}>Activation Checklist</p><h2>Critério mínimo para certificar cada provider</h2></div>
         <ol>
           <li>Vault criptografado, sessão e autenticação do scheduler configurados.</li>
           <li>Credenciais de plataforma Google/Meta armazenadas no vault por um operador autorizado; nenhum segredo é persistido na UI.</li>
@@ -148,7 +165,7 @@ export default async function UnifiedSetupPage({ searchParams }: PageProps) {
         </ol>
       </section>
 
-      <footer className={styles.footer}><span>Production Readiness · INT-39</span><span>Tehkné Solutions</span></footer>
+      <footer className={styles.footer}><span>Release Capability Matrix · INT-73</span><span>Tehkné Solutions</span></footer>
     </main>
   );
 }
