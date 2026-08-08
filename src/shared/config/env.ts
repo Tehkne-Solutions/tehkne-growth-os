@@ -21,10 +21,26 @@ const serverEnvironmentSchema = z
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
 
+export function resolveApplicationUrl(input: NodeJS.ProcessEnv): string | undefined {
+  const explicit = input.APP_URL?.trim();
+  if (explicit) return explicit;
+
+  const productionDomain = input.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  if (productionDomain) return normalizeHttpsUrl(productionDomain);
+
+  const deploymentDomain = input.VERCEL_URL?.trim();
+  if (deploymentDomain) return normalizeHttpsUrl(deploymentDomain);
+
+  return undefined;
+}
+
 export function parseServerEnvironment(
   input: NodeJS.ProcessEnv,
 ): ServerEnvironment {
-  return serverEnvironmentSchema.parse(input);
+  return serverEnvironmentSchema.parse({
+    ...input,
+    APP_URL: resolveApplicationUrl(input),
+  });
 }
 
 export function requireSessionSecret(environment: ServerEnvironment): string {
@@ -33,4 +49,9 @@ export function requireSessionSecret(environment: ServerEnvironment): string {
   }
 
   return environment.SESSION_SECRET;
+}
+
+function normalizeHttpsUrl(value: string): string {
+  if (/^https?:\/\//i.test(value)) return value;
+  return `https://${value}`;
 }
