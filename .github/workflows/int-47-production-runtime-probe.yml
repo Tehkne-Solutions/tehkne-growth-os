@@ -11,12 +11,13 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       VERCEL_SCOPE: tehkne-solutions-projects
       VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,9 +35,18 @@ jobs:
       - name: Probe RC workspace
         shell: bash
         run: |
-          set +e
           response=$(vercel curl /api/internal/rc-workspace -- --silent --show-error --fail-with-body --header "Authorization: Bearer $CRON_SECRET")
-          status=$?
-          set -e
           printf 'WORKSPACE_RESPONSE=%s\n' "$response"
-          echo "WORKSPACE_EXIT=$status"
+      - name: Resolve current Production deployment URL
+        id: production
+        shell: bash
+        run: |
+          output=$(vercel list "$VERCEL_PROJECT_NAME" --prod --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN")
+          printf '%s\n' "$output"
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | head -n 1)
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Run RC smoke against Production
+        env:
+          GROWTH_OS_BASE_URL: ${{ steps.production.outputs.url }}
+        run: node scripts/release-candidate-smoke.mjs
