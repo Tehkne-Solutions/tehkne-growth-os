@@ -57,6 +57,47 @@ Optional override:
 
 The Vercel project must contain the runtime environment variables documented by production readiness, including database, connector-vault, provider and scheduler configuration. The workflows never print or copy Sensitive environment values into source control.
 
+## Platform connector credential bootstrap
+
+Google Ads and Meta Ads use platform-level credentials that must be supplied by the real provider accounts; Growth OS never invents these credentials and never stores them in source control or GitHub Actions.
+
+The canonical encrypted vault references are code-owned defaults:
+
+- Google Ads Developer Token: `growth-connectors/platform/google-ads/developer-token`
+- Google OAuth client: `growth-connectors/platform/google-ads/oauth-client`
+- Meta OAuth client: `growth-connectors/platform/meta-ads/oauth-client`
+
+Deployment-controlled overrides remain supported through `GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF`, `GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF` and `META_ADS_OAUTH_CLIENT_SECRET_REF`, but they are optional. When absent, the canonical references above are used automatically.
+
+The supported payload contracts are fixed by code:
+
+- Google Ads Developer Token: `{ developerToken }`
+- Google OAuth client: `{ clientId, clientSecret }`
+- Meta OAuth client: `{ clientId, clientSecret }`
+
+The Setup surface `/command-center/setup` exposes credential storage/rotation only to an authenticated user whose **same ACTIVE OPERATOR membership** contains both `identity.roles.assign_any` and `growth.connectors.manage`. The API is same-origin protected and does not accept arbitrary secret-reference paths.
+
+Credential writes use the existing AES-256-GCM Postgres vault. Initial configuration or rotation and its `audit_events` record are committed in the same Prisma transaction. Audit metadata records the credential kind, non-secret reference, rotation state and Tehkné Solutions signature; secret values are never written to audit metadata.
+
+The application only reports credential status (`configured` / `missing`). Current secret material is never returned to the browser or rehydrated into forms. Production readiness decrypts the resolved vault entries and validates their required payload shape; a configured reference alone is not evidence that provider infrastructure is ready.
+
+Current provider environment contract:
+
+- Google Ads API version: `v25`
+- Meta Graph/Marketing API version: `v25.0`
+- `CONNECTOR_SECRET_MASTER_KEY`: required for the encrypted vault
+- HubSpot: uses the same encrypted vault for each connection token
+
+External inputs that must remain provider-/operator-supplied:
+
+- Google Ads Developer Token
+- Google OAuth Client ID and Client Secret
+- Meta App/Client ID and App Secret
+- HubSpot numeric Portal ID and Private App access token
+- a real `OPERATIONS_ALERT_WEBHOOK_URL` destination for out-of-band operational alerts
+
+After those inputs are supplied, Google/Meta still require the real OAuth grant and explicit account selection; HubSpot validates the supplied Private App token with a real read before creating an ACTIVE connection. First-sync evidence cannot be fabricated or replaced by configuration-only checks.
+
 ## RC workspace bootstrap
 
 The canonical isolated validation tenant is:
