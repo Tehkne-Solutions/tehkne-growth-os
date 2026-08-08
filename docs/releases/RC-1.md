@@ -12,7 +12,7 @@ Validate the already-hardened Growth OS build against a real published environme
 
 - `GROWTH_OS_BASE_URL`: public HTTPS deployment URL.
 - `CRON_SECRET`: production/staging scheduler secret.
-- `WORKSPACE_ID`: validation workspace with representative connectors configured.
+- `WORKSPACE_ID`: validation workspace with representative connectors configured; the release workflow resolves the canonical RC workspace automatically when no override is supplied.
 - `VERCEL_TOKEN`: GitHub Actions secret used only by the RC deployment/bootstrap workflows.
 
 Never commit secret values.
@@ -33,13 +33,16 @@ Never commit secret values.
 
 ## Vercel RC deployment
 
-The GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It targets the Tehkné Solutions Vercel scope, installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment when smoke credentials are available.
+The GitHub Actions workflow `Release Candidate Deploy` is the canonical deployment entrypoint for RC validation. It targets the Tehkné Solutions Vercel scope, installs the Vercel CLI, checks for the `tehkne-growth-os` project and creates it when absent, links the repository non-interactively, resolves the canonical RC workspace when available, creates a preview or production deployment, records the resulting URL and executes `npm run smoke:rc` against that exact deployment when smoke prerequisites are available.
 
 Required GitHub Actions secrets:
 
 - `VERCEL_TOKEN`
 - `CRON_SECRET`
-- `RC_WORKSPACE_ID` for the authenticated smoke gate
+
+Optional override:
+
+- `RC_WORKSPACE_ID` — when present, it takes precedence over database discovery. When absent, the workflow resolves the active `rc-validation` workspace from the target environment database.
 
 The Vercel project must contain the runtime environment variables documented by production readiness, including database, vault, OAuth/provider configuration and scheduler secrets. The workflows do not copy secret values into source control.
 
@@ -59,6 +62,7 @@ The workspace bootstrap is intentionally separate from schema migrations. It use
 
 - `scripts/rc-workspace-inspect.sql` for read-only state inspection;
 - `scripts/rc-workspace-bootstrap.sql` for an idempotent transactional bootstrap with `rc.workspace.bootstrap` audit evidence;
+- `scripts/rc-workspace-id.sql` for canonical workspace discovery without treating the UUID as a secret;
 - the `RC Workspace Bootstrap` workflow for environment access and mutation guards.
 
 Safety rules:
@@ -70,7 +74,7 @@ Safety rules:
 5. Production apply requires the exact confirmation `APPLY_RC_WORKSPACE_PRODUCTION`.
 6. An environment without `DATABASE_URL` is reported as `UNCONFIGURED`; apply remains blocked.
 7. The SQL bootstrap is validated against PostgreSQL 16, executed twice and required to produce exactly one canonical workspace and one bootstrap audit record.
-8. After Production bootstrap, record the resolved workspace UUID as `RC_WORKSPACE_ID` before the authenticated smoke gate.
+8. After bootstrap, `Release Candidate Deploy` resolves the workspace UUID from the target database automatically; `RC_WORKSPACE_ID` remains available only as an explicit override.
 
 A missing Preview database does not itself block project provisioning. Production RC approval still requires a configured database, the canonical validation workspace and all real-operation gates below.
 
