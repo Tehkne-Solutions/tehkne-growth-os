@@ -64,13 +64,30 @@ jobs:
             --scope "$VERCEL_SCOPE" \
             --token "$VERCEL_TOKEN"
 
+      - name: Inspect newest Preview and current Production
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "===== newest READY Preview observed by INT-70 ====="
+          vercel inspect "https://tehkne-growth-7smlzx46w-tehkne-solutions-projects.vercel.app" \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" || true
+          echo "===== recent READY Production observed by INT-70 ====="
+          vercel inspect "https://tehkne-growth-2ve6taigm-tehkne-solutions-projects.vercel.app" \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" || true
+          echo "===== canonical Production alias ====="
+          vercel inspect "https://tehkne-growth-os.vercel.app" \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN" || true
+
       - name: Record read-only recovery evidence
         run: |
           {
             echo "## INT-70 existing deployment recovery"
             echo ""
             echo "- Operation: read-only Vercel deployment inventory"
-            echo "- No deployment created"
+            echo "- No deployment created by this workflow"
             echo "- No alias changed"
             echo "- No Production mutation"
             echo "- Signature: Tehkné Solutions"
