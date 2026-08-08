@@ -21,17 +21,19 @@ jobs:
   diagnose:
     name: Diagnose RC bootstrap prerequisites
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       RC_WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
       GROWTH_OS_SCHEDULER_URL: ${{ secrets.GROWTH_OS_SCHEDULER_URL }}
     steps:
-      - name: Report prerequisite status
+      - name: Report GitHub prerequisite status
         run: |
           missing=0
-          check_secret() {
+          check_required_secret() {
             name="$1"
             value="$2"
             if [ -n "$value" ]; then
@@ -42,9 +44,14 @@ jobs:
             fi
           }
 
-          check_secret VERCEL_TOKEN "$VERCEL_TOKEN"
-          check_secret CRON_SECRET "$CRON_SECRET"
-          check_secret RC_WORKSPACE_ID "$RC_WORKSPACE_ID"
+          check_required_secret VERCEL_TOKEN "$VERCEL_TOKEN"
+          check_required_secret CRON_SECRET "$CRON_SECRET"
+
+          if [ -n "$RC_WORKSPACE_ID" ]; then
+            echo "RC_BOOTSTRAP RC_WORKSPACE_ID=optional-override-configured"
+          else
+            echo "RC_BOOTSTRAP RC_WORKSPACE_ID=optional-runtime-discovery"
+          fi
 
           if [ -n "$GROWTH_OS_SCHEDULER_URL" ]; then
             echo "RC_BOOTSTRAP GROWTH_OS_SCHEDULER_URL=configured"
@@ -56,16 +63,100 @@ jobs:
             echo "RC_BOOTSTRAP_STATUS=ready"
           else
             echo "RC_BOOTSTRAP_STATUS=blocked missing_required=$missing"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" >/dev/null
+
+      - name: Diagnose Production provider infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_list=$(NO_COLOR=1 vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+
+          has_env() {
+            name="$1"
+            printf '%s\n' "$env_list" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"
+          }
+
+          missing_names() {
+            result=""
+            for name in "$@"; do
+              if ! has_env "$name"; then
+                if [ -n "$result" ]; then result="$result,"; fi
+                result="$result$name"
+              fi
+            done
+            printf '%s' "$result"
+          }
+
+          google_missing=$(missing_names \
+            CONNECTOR_SECRET_MASTER_KEY \
+            GOOGLE_ADS_API_VERSION \
+            GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF \
+            GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF)
+          meta_missing=$(missing_names \
+            CONNECTOR_SECRET_MASTER_KEY \
+            META_GRAPH_API_VERSION \
+            META_ADS_OAUTH_CLIENT_SECRET_REF)
+          hubspot_missing=$(missing_names CONNECTOR_SECRET_MASTER_KEY)
+
+          if [ -z "$google_missing" ]; then
+            echo "RC_PROVIDER_INFRA GOOGLE_ADS=ready"
+            google_status=ready
+          else
+            echo "RC_PROVIDER_INFRA GOOGLE_ADS=missing names=$google_missing"
+            google_status="missing: $google_missing"
+          fi
+
+          if [ -z "$meta_missing" ]; then
+            echo "RC_PROVIDER_INFRA META_ADS=ready"
+            meta_status=ready
+          else
+            echo "RC_PROVIDER_INFRA META_ADS=missing names=$meta_missing"
+            meta_status="missing: $meta_missing"
+          fi
+
+          if [ -z "$hubspot_missing" ]; then
+            echo "RC_PROVIDER_INFRA HUBSPOT=ready"
+            hubspot_status=ready
+          else
+            echo "RC_PROVIDER_INFRA HUBSPOT=missing names=$hubspot_missing"
+            hubspot_status="missing: $hubspot_missing"
+          fi
+
+          if has_env OPERATIONS_ALERT_WEBHOOK_URL; then
+            echo "RC_PROVIDER_INFRA OPERATIONS_ALERT_WEBHOOK_URL=configured"
+            webhook_status=configured
+          else
+            echo "RC_PROVIDER_INFRA OPERATIONS_ALERT_WEBHOOK_URL=missing"
+            webhook_status=missing
           fi
 
           {
             echo "## Tehkné Growth OS RC bootstrap"
             echo ""
-            echo "Required secrets are reported only as configured/missing; values are never printed."
+            echo "Only configured/missing status and expected variable names are reported; environment values are never read or printed."
             echo ""
-            echo "- VERCEL_TOKEN: $([ -n "$VERCEL_TOKEN" ] && echo configured || echo missing)"
-            echo "- CRON_SECRET: $([ -n "$CRON_SECRET" ] && echo configured || echo missing)"
-            echo "- RC_WORKSPACE_ID: $([ -n "$RC_WORKSPACE_ID" ] && echo configured || echo missing)"
-            echo "- GROWTH_OS_SCHEDULER_URL: $([ -n "$GROWTH_OS_SCHEDULER_URL" ] && echo configured || echo optional-missing)"
+            echo "### GitHub release prerequisites"
+            echo "- VERCEL_TOKEN: configured"
+            echo "- CRON_SECRET: configured"
+            echo "- RC_WORKSPACE_ID: $([ -n "$RC_WORKSPACE_ID" ] && echo optional override configured || echo runtime discovery)"
+            echo "- GROWTH_OS_SCHEDULER_URL: $([ -n "$GROWTH_OS_SCHEDULER_URL" ] && echo configured || echo optional missing)"
+            echo ""
+            echo "### Vercel Production provider infrastructure"
+            echo "- Google Ads: $google_status"
+            echo "- Meta Ads: $meta_status"
+            echo "- HubSpot vault: $hubspot_status"
+            echo "- Operations webhook: $webhook_status"
             echo "- Signature: Tehkné Solutions"
           } >> "$GITHUB_STEP_SUMMARY"
