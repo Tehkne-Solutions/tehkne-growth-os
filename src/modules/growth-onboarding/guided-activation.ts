@@ -11,6 +11,7 @@ import type { ProviderAccount, ReadOnlyProviderAdapter } from "@/modules/growth-
 import type { SecretProvider } from "@/modules/growth-connectors/secret-provider";
 import { HubSpotCrmAdapter } from "@/modules/growth-crm/hubspot-adapter";
 import type { HubSpotAttributionPropertyMap } from "@/modules/growth-crm/types";
+import { platformConnectorSecretRefsFromEnvironment } from "@/modules/growth-onboarding/platform-connector-secrets";
 import type { TenantContext } from "@/modules/tenancy";
 import { resolveApplicationUrl } from "@/shared/config/env";
 import type { DatabaseClient } from "@/shared/db/client";
@@ -40,13 +41,14 @@ export function guidedActivationEnvironmentFromProcess(environment: NodeJS.Proce
   if (!appUrl) {
     throw new GuidedActivationConfigurationError("APP_URL or Vercel application URL is required for guided activation.");
   }
+  const refs = platformConnectorSecretRefsFromEnvironment(environment);
   return {
     appUrl,
+    googleDeveloperTokenSecretRef: refs.googleAdsDeveloperToken,
+    googleOAuthClientSecretRef: refs.googleAdsOAuthClient,
+    metaOAuthClientSecretRef: refs.metaAdsOAuthClient,
     ...(environment.GOOGLE_ADS_API_VERSION ? { googleApiVersion: environment.GOOGLE_ADS_API_VERSION } : {}),
-    ...(environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF ? { googleDeveloperTokenSecretRef: environment.GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF } : {}),
-    ...(environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF ? { googleOAuthClientSecretRef: environment.GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF } : {}),
     ...(environment.META_GRAPH_API_VERSION ? { metaApiVersion: environment.META_GRAPH_API_VERSION } : {}),
-    ...(environment.META_ADS_OAUTH_CLIENT_SECRET_REF ? { metaOAuthClientSecretRef: environment.META_ADS_OAUTH_CLIENT_SECRET_REF } : {}),
   };
 }
 

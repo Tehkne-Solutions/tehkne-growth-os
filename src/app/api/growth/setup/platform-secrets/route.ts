@@ -16,6 +16,7 @@ import {
   assertPlatformConnectorSecretManager,
   configurePlatformConnectorSecret,
   inspectPlatformConnectorSecrets,
+  platformConnectorSecretRefsFromEnvironment,
 } from "@/modules/growth-onboarding/platform-connector-secrets";
 import { parseServerEnvironment, requireSessionSecret } from "@/shared/config/env";
 import { getDatabase } from "@/shared/db/client";
@@ -53,9 +54,11 @@ export async function GET(request: Request) {
       operatorOrganizationId: url.searchParams.get("operatorOrganizationId"),
     });
     const context = await authenticatedPlatformSecretContext(query.operatorOrganizationId);
+    const refs = platformConnectorSecretRefsFromEnvironment(process.env);
     const status = await inspectPlatformConnectorSecrets(
       context.database,
       context.masterKey,
+      refs,
     );
     return Response.json(
       { status, signature: "Tehkné Solutions" },
@@ -94,6 +97,7 @@ export async function POST(request: Request) {
         operatorOrganizationId: body.operatorOrganizationId,
         actorUserId: context.userId,
         secret,
+        refs: platformConnectorSecretRefsFromEnvironment(process.env),
         requestId,
       },
     );

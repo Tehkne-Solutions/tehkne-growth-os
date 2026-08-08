@@ -6,6 +6,7 @@ import type { AuthorizationMembershipStore } from "@/modules/identity/applicatio
 import {
   assertPlatformConnectorSecretManager,
   canManagePlatformConnectorSecrets,
+  platformConnectorSecretRefsFromEnvironment,
   PLATFORM_CONNECTOR_SECRET_REFS,
 } from "./platform-connector-secrets";
 
@@ -76,12 +77,28 @@ describe("platform connector secret authorization", () => {
       permission: "growth.platform_secrets.manage",
     }));
   });
+});
 
-  it("uses fixed platform refs rather than caller-provided secret references", () => {
+describe("platform connector secret references", () => {
+  it("uses fixed canonical refs when environment overrides are absent", () => {
     expect(PLATFORM_CONNECTOR_SECRET_REFS).toEqual({
       googleAdsDeveloperToken: "growth-connectors/platform/google-ads/developer-token",
       googleAdsOAuthClient: "growth-connectors/platform/google-ads/oauth-client",
       metaAdsOAuthClient: "growth-connectors/platform/meta-ads/oauth-client",
+    });
+    expect(platformConnectorSecretRefsFromEnvironment({} as NodeJS.ProcessEnv))
+      .toEqual(PLATFORM_CONNECTOR_SECRET_REFS);
+  });
+
+  it("honors deployment-controlled ref overrides without accepting caller refs", () => {
+    expect(platformConnectorSecretRefsFromEnvironment({
+      GOOGLE_ADS_DEVELOPER_TOKEN_SECRET_REF: "custom/google/developer",
+      GOOGLE_ADS_OAUTH_CLIENT_SECRET_REF: "custom/google/oauth",
+      META_ADS_OAUTH_CLIENT_SECRET_REF: "custom/meta/oauth",
+    } as NodeJS.ProcessEnv)).toEqual({
+      googleAdsDeveloperToken: "custom/google/developer",
+      googleAdsOAuthClient: "custom/google/oauth",
+      metaAdsOAuthClient: "custom/meta/oauth",
     });
   });
 });
