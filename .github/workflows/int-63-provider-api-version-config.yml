@@ -1,0 +1,101 @@
+name: INT-63 Provider API Version Config
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-63-provider-api-version-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  configure-provider-versions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      GOOGLE_ADS_API_VERSION_VALUE: v25
+      META_GRAPH_API_VERSION_VALUE: v25.0
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Require Vercel credential
+        run: test -n "$VERCEL_TOKEN"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical Vercel project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" >/dev/null
+
+      - name: Verify non-sensitive CLI mode exists
+        shell: bash
+        run: vercel env add --help | grep -q -- '--no-sensitive'
+
+      - name: Fail-closed preflight — versions must still be absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_list=$(NO_COLOR=1 vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+          has_env() {
+            name="$1"
+            printf '%s\n' "$env_list" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"
+          }
+
+          blocked=0
+          if has_env GOOGLE_ADS_API_VERSION; then
+            echo "RC_PROVIDER_VERSION_PREFLIGHT GOOGLE_ADS_API_VERSION=already-configured"
+            blocked=1
+          else
+            echo "RC_PROVIDER_VERSION_PREFLIGHT GOOGLE_ADS_API_VERSION=absent"
+          fi
+          if has_env META_GRAPH_API_VERSION; then
+            echo "RC_PROVIDER_VERSION_PREFLIGHT META_GRAPH_API_VERSION=already-configured"
+            blocked=1
+          else
+            echo "RC_PROVIDER_VERSION_PREFLIGHT META_GRAPH_API_VERSION=absent"
+          fi
+
+          if [ "$blocked" -ne 0 ]; then
+            echo "RC_PROVIDER_VERSION_PREFLIGHT=BLOCKED concurrent_configuration_detected"
+            exit 2
+          fi
+          echo "RC_PROVIDER_VERSION_PREFLIGHT=PASS"
+
+      - name: Configure Google Ads API v25
+        shell: bash
+        run: |
+          printf '%s' "$GOOGLE_ADS_API_VERSION_VALUE" | vercel env add GOOGLE_ADS_API_VERSION production \
+            --no-sensitive \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN"
+          echo "RC_PROVIDER_VERSION GOOGLE_ADS_API_VERSION=configured value=$GOOGLE_ADS_API_VERSION_VALUE"
+
+      - name: Configure Meta Graph API v25.0
+        shell: bash
+        run: |
+          printf '%s' "$META_GRAPH_API_VERSION_VALUE" | vercel env add META_GRAPH_API_VERSION production \
+            --no-sensitive \
+            --scope "$VERCEL_SCOPE" \
+            --token "$VERCEL_TOKEN"
+          echo "RC_PROVIDER_VERSION META_GRAPH_API_VERSION=configured value=$META_GRAPH_API_VERSION_VALUE"
+
+      - name: Verify Production variable names
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_list=$(NO_COLOR=1 vercel env ls production --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" 2>&1)
+          for name in GOOGLE_ADS_API_VERSION META_GRAPH_API_VERSION; do
+            if printf '%s\n' "$env_list" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"; then
+              echo "RC_PROVIDER_VERSION_POSTFLIGHT $name=configured"
+            else
+              echo "RC_PROVIDER_VERSION_POSTFLIGHT $name=missing"
+              exit 1
+            fi
+          done
+          echo "RC_PROVIDER_VERSION_CONFIG=PASS"
