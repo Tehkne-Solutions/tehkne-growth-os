@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { DatabaseClient } from "@/shared/db/client";
 
 export type SecretPayload = Readonly<Record<string, string>>;
+export type SecretVaultDatabase = Pick<DatabaseClient, "$executeRaw" | "$queryRaw">;
 
 export interface SecretProvider {
   put(secretRef: string, payload: SecretPayload): Promise<void>;
@@ -17,7 +18,7 @@ export class PostgresEncryptedSecretProvider implements SecretProvider {
   private readonly key: Buffer;
 
   constructor(
-    private readonly database: DatabaseClient,
+    private readonly database: SecretVaultDatabase,
     masterKeyBase64: string,
   ) {
     this.key = decodeMasterKey(masterKeyBase64);
