@@ -1,0 +1,84 @@
+name: INT-44 PostgreSQL Discovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/int-44-postgres-discovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  discover-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      VERCEL_SCOPE: tehkne-solutions-projects
+      VERCEL_PROJECT_NAME: tehkne-growth-os
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Vercel credential
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "POSTGRES_DISCOVERY=BLOCKED missing=VERCEL_TOKEN"
+            exit 2
+          fi
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link canonical project
+        run: vercel link --yes --project "$VERCEL_PROJECT_NAME" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+
+      - name: List existing marketplace resources
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_RESOURCES_BEGIN"
+          vercel integration list --all --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_RESOURCES_END"
+
+      - name: List Neon installations
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_NEON_INSTALLATIONS_BEGIN"
+          vercel integration installations --integration neon --format json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_NEON_INSTALLATIONS_END"
+
+      - name: Discover Postgres marketplace products
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_MARKETPLACE_BEGIN"
+          vercel integration discover postgres --format=json --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          echo "POSTGRES_DISCOVERY_MARKETPLACE_END"
+
+      - name: Inspect Neon provisioning contract
+        shell: bash
+        run: |
+          echo "POSTGRES_DISCOVERY_NEON_HELP_BEGIN"
+          vercel integration add neon --help
+          echo "POSTGRES_DISCOVERY_NEON_HELP_END"
+
+      - name: Confirm environment remains unchanged
+        shell: bash
+        run: |
+          set +e
+          output=$(vercel env run -e production -- bash -lc '
+            if [ -n "$DATABASE_URL" ]; then
+              echo "DATABASE_URL=configured"
+            else
+              echo "DATABASE_URL=missing"
+            fi
+          ')
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          exit "$status"
