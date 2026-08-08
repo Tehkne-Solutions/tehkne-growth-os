@@ -1,17 +1,6 @@
 name: Release Candidate Deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "prisma/**"
-      - "sector-packs/**"
-      - "package.json"
-      - "package-lock.json"
-      - "next.config.ts"
-      - "vercel.json"
-      - ".github/workflows/release-candidate-deploy.yml"
   workflow_dispatch:
     inputs:
       target:
@@ -27,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: growth-os-rc-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+  group: growth-os-rc-deploy-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -40,7 +29,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       WORKSPACE_ID: ${{ secrets.RC_WORKSPACE_ID }}
-      RC_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'preview' }}
+      RC_TARGET: ${{ inputs.target }}
       PRODUCTION_PUBLIC_URL: https://tehkne-growth-os.vercel.app
 
     steps:
